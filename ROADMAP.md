@@ -28,7 +28,7 @@ Entregables:
 
 **Terminado cuando:** el sistema carga los datos oficiales y reporta claramente cualquier problema sin cerrarse.
 
-## Fase 2 — Proyección base de consumo
+## Fase 2 — Proyección base de consumo ✅
 
 **Objetivo:** proyectar la semana siguiente de manera transparente.
 
@@ -37,6 +37,8 @@ Entregables:
 - Resultado por sucursal e ingrediente.
 - Manejo de históricos incompletos.
 - Pruebas con casos conocidos.
+
+**Estado:** implementada y cubierta por pruebas unitarias.
 
 **Terminado cuando:** cada combinación válida tiene una proyección reproducible y explicable.
 

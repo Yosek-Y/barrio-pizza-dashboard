@@ -4,9 +4,9 @@ Dashboard para analizar las órdenes de compra semanales de las sucursales de Ba
 
 ## Estado del proyecto
 
-**Fase 1 — Carga y validación de datos terminada.**
+**Fase 2 — Proyección base de consumo terminada.**
 
-La aplicación ya carga los cuatro CSV, convierte las columnas numéricas y reporta problemas sin cerrar el dashboard.
+La aplicación carga y valida los cuatro CSV y calcula una proyección reproducible de la semana S7 mediante el promedio histórico por sucursal e ingrediente.
 
 Validaciones actuales:
 
@@ -19,7 +19,15 @@ Validaciones actuales:
 - Inventarios ausentes.
 - Combinaciones que no aparecen en la orden semanal.
 
-La siguiente fase implementará la proyección base del consumo.
+Funciones de proyección actuales:
+
+- Promedio simple de las semanas disponibles.
+- Resultado por sucursal e ingrediente.
+- Consumo mínimo, máximo y promedio.
+- Marca de histórico completo o incompleto.
+- Gráfica de S1–S6 con el punto proyectado de S7.
+
+La siguiente fase calculará la necesidad real, convertirá formatos de compra y generará las alertas del reto.
 
 ## Tecnologías
 
@@ -79,6 +87,7 @@ barrio-pizza-ai-dashboard/
 ├── app.py
 ├── README.md
 ├── ROADMAP.md
+├── FASE_2_EXPLICADA.md
 ├── SETUP_WINDOWS.md
 ├── requirements.txt
 ├── pyproject.toml
@@ -93,17 +102,20 @@ barrio-pizza-ai-dashboard/
 │   └── validations.py
 └── tests/
     ├── test_data_validation.py
+    ├── test_forecasting.py
     └── test_project_structure.py
 ```
 
 ## Qué debe aparecer con los datos oficiales
 
-La Fase 1 debe reconocer, entre otros casos:
+La aplicación debe reconocer, entre otros casos:
 
 - Un ingrediente de la orden que no está registrado en el catálogo.
 - Una combinación de sucursal e ingrediente que no aparece en la orden semanal.
 
-Estos casos se muestran como advertencias y no hacen que la aplicación se cierre. La Fase 3 determinará si una línea ausente representa realmente un faltante de compra.
+Estos casos se muestran como advertencias y no hacen que la aplicación se cierre. La pestaña **Proyección S7** permite comprobar el promedio de cada combinación. La Fase 3 determinará si una línea ausente representa realmente un faltante de compra.
+
+Para una explicación orientada a principiantes, consulta [`FASE_2_EXPLICADA.md`](FASE_2_EXPLICADA.md).
 
 ## Fuente de los datos
 
