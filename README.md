@@ -4,30 +4,26 @@ Dashboard para analizar las órdenes de compra semanales de las sucursales de Ba
 
 ## Estado del proyecto
 
-**Fase 2 — Proyección base de consumo terminada.**
+**Fase 3 — Necesidad real y motor de alertas terminada.**
 
-La aplicación carga y valida los cuatro CSV y calcula una proyección reproducible de la semana S7 mediante el promedio histórico por sucursal e ingrediente.
+La aplicación actualmente:
 
-Validaciones actuales:
+1. carga y valida los cuatro CSV;
+2. proyecta S7 mediante el promedio histórico;
+3. descuenta el inventario actual;
+4. convierte la necesidad a formatos completos;
+5. compara la recomendación con la orden semanal;
+6. genera un estado, una acción y un mensaje explicativo.
 
-- Archivos y columnas obligatorias.
-- Valores vacíos y números inválidos.
-- Cantidades negativas.
-- Registros duplicados.
-- Ingredientes que no existen en el catálogo.
-- Históricos con menos o más de seis semanas.
-- Inventarios ausentes.
-- Combinaciones que no aparecen en la orden semanal.
+Estados disponibles:
 
-Funciones de proyección actuales:
+- `CORRECTO`;
+- `FALTANTE`;
+- `OMITIDO`;
+- `SOBREPEDIDO`;
+- `DATO_INVALIDO`.
 
-- Promedio simple de las semanas disponibles.
-- Resultado por sucursal e ingrediente.
-- Consumo mínimo, máximo y promedio.
-- Marca de histórico completo o incompleto.
-- Gráfica de S1–S6 con el punto proyectado de S7.
-
-La siguiente fase calculará la necesidad real, convertirá formatos de compra y generará las alertas del reto.
+La regla principal de redondeo está implementada: un excedente menor que un formato completo es normal. Solo se considera sobrepedido cuando la sucursal solicita al menos un formato completo adicional frente a la recomendación.
 
 ## Tecnologías
 
@@ -41,7 +37,7 @@ La siguiente fase calculará la necesidad real, convertirá formatos de compra y
 
 La guía detallada para principiantes está en [`SETUP_WINDOWS.md`](SETUP_WINDOWS.md).
 
-Resumen de comandos desde la carpeta del proyecto:
+Resumen desde la carpeta del proyecto:
 
 ```powershell
 py -m venv .venv
@@ -54,12 +50,24 @@ python -m pytest
 python -m streamlit run app.py
 ```
 
-## Comandos de uso frecuente
+## Uso diario en `C:\Proyecto_Barrio_Pizza`
+
+Abrir la carpeta:
+
+```powershell
+cd C:\Proyecto_Barrio_Pizza
+```
 
 Activar el entorno:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
+```
+
+Ejecutar las pruebas:
+
+```powershell
+python -m pytest
 ```
 
 Ejecutar la aplicación:
@@ -68,16 +76,30 @@ Ejecutar la aplicación:
 python -m streamlit run app.py
 ```
 
-Ejecutar pruebas:
+Detener Streamlit:
 
-```powershell
-python -m pytest
+```text
+Ctrl + C
 ```
 
-Revisar estilo del código:
+## Fórmulas actuales
 
-```powershell
-python -m ruff check .
+### Proyección
+
+```text
+consumo proyectado S7 = promedio de S1 a S6
+```
+
+### Necesidad real
+
+```text
+necesidad real = máximo(consumo proyectado - inventario actual, 0)
+```
+
+### Formatos recomendados
+
+```text
+formatos recomendados = ceil(necesidad real / unidad base por formato)
 ```
 
 ## Estructura
@@ -88,6 +110,7 @@ barrio-pizza-ai-dashboard/
 ├── README.md
 ├── ROADMAP.md
 ├── FASE_2_EXPLICADA.md
+├── FASE_3_EXPLICADA.md
 ├── SETUP_WINDOWS.md
 ├── requirements.txt
 ├── pyproject.toml
@@ -103,21 +126,32 @@ barrio-pizza-ai-dashboard/
 └── tests/
     ├── test_data_validation.py
     ├── test_forecasting.py
+    ├── test_purchase_analysis.py
     └── test_project_structure.py
 ```
 
-## Qué debe aparecer con los datos oficiales
+## Pruebas
 
-La aplicación debe reconocer, entre otros casos:
+La Fase 3 incluye 19 pruebas automáticas. Entre otros casos, verifican:
 
-- Un ingrediente de la orden que no está registrado en el catálogo.
-- Una combinación de sucursal e ingrediente que no aparece en la orden semanal.
+- valores inválidos y negativos;
+- ingredientes desconocidos;
+- históricos incompletos;
+- promedio de seis semanas;
+- faltante de compra;
+- orden omitida;
+- sobrepedido de un formato completo;
+- redondeo normal sin falsas alertas.
 
-Estos casos se muestran como advertencias y no hacen que la aplicación se cierre. La pestaña **Proyección S7** permite comprobar el promedio de cada combinación. La Fase 3 determinará si una línea ausente representa realmente un faltante de compra.
+## Documentación para principiantes
 
-Para una explicación orientada a principiantes, consulta [`FASE_2_EXPLICADA.md`](FASE_2_EXPLICADA.md).
+- [`FASE_2_EXPLICADA.md`](FASE_2_EXPLICADA.md): cómo funciona la proyección.
+- [`FASE_3_EXPLICADA.md`](FASE_3_EXPLICADA.md): necesidad, formatos y alertas.
+
+## Siguiente fase
+
+La Fase 4 transformará los resultados en un dashboard ejecutivo con mejor jerarquía visual, filtros, prioridades y pedido corregido descargable.
 
 ## Fuente de los datos
 
-Los CSV pertenecen al reto técnico público de Barrio Pizza:
-`soydelbarrio/reto-practicante-ia`.
+Los CSV pertenecen al reto técnico público de Barrio Pizza: `soydelbarrio/reto-practicante-ia`.

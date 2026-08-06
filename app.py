@@ -7,6 +7,7 @@ import streamlit as st
 
 from src.data_loader import DATASET_FILES, load_data_bundle
 from src.forecasting import build_baseline_forecast, get_history_with_projection
+from src.purchase_analysis import analyze_orders
 from src.validations import validate_data
 
 st.set_page_config(
@@ -16,7 +17,7 @@ st.set_page_config(
 )
 
 st.title("🍕 Control inteligente de órdenes de compra")
-st.caption("Reto técnico de IA — Barrio Pizza · Fase 2: proyección base de consumo")
+st.caption("Reto técnico de IA — Barrio Pizza · Fase 3: necesidad real y alertas")
 
 try:
     data = load_data_bundle()
@@ -32,73 +33,93 @@ except (FileNotFoundError, ValueError) as exc:
     st.stop()
 
 report = validate_data(data)
-forecast = None if report.has_errors else build_baseline_forecast(report.cleaned_data)
+forecast = None
+purchase_analysis = None
+if not report.has_errors:
+    forecast = build_baseline_forecast(report.cleaned_data)
+    purchase_analysis = analyze_orders(report.cleaned_data, forecast)
 
-metric_columns = st.columns(4)
+metric_columns = st.columns(5)
 metric_columns[0].metric("Archivos cargados", len(DATASET_FILES))
 metric_columns[1].metric("Registros", data.total_rows)
-metric_columns[2].metric("Errores", len(report.errors))
+metric_columns[2].metric("Errores de datos", len(report.errors))
 metric_columns[3].metric("Advertencias", len(report.warnings))
+metric_columns[4].metric(
+    "Alertas de compra",
+    "—" if purchase_analysis is None else purchase_analysis.alert_count,
+)
 
 if report.has_errors:
     st.error(
-        "Hay errores de datos que bloquean la proyección. Revísalos en la pestaña Hallazgos."
+        "Hay errores de datos que bloquean el análisis. Revísalos en la pestaña Hallazgos."
     )
 elif report.warnings:
     st.warning(
-        "La proyección pudo calcularse, pero existen situaciones que requieren revisión."
+        "El análisis pudo calcularse, pero existen situaciones que requieren revisión."
     )
 else:
-    st.success("Los datos son válidos y la proyección base se calculó correctamente.")
+    st.success("Los datos son válidos y las órdenes fueron analizadas correctamente.")
 
-summary_tab, forecast_tab, issues_tab, data_tab = st.tabs(
-    ["Resumen", "Proyección S7", "Hallazgos", "Datos cargados"]
+summary_tab, forecast_tab, analysis_tab, issues_tab, data_tab = st.tabs(
+    [
+        "Resumen",
+        "Proyección S7",
+        "Análisis de órdenes",
+        "Hallazgos",
+        "Datos cargados",
+    ]
 )
 
 with summary_tab:
-    st.subheader("Qué hace la Fase 2")
+    st.subheader("Qué hace la Fase 3")
     st.write(
-        "Para cada sucursal e ingrediente, la aplicación suma el consumo válido de "
-        "las semanas S1 a S6 y lo divide entre la cantidad de observaciones. Ese "
-        "promedio es la proyección de S7."
+        "La aplicación toma la proyección de S7, descuenta el inventario disponible y "
+        "calcula cuántos formatos completos deben comprarse. Después compara esa "
+        "recomendación con la orden enviada por cada sucursal."
     )
 
-    st.code(
-        "consumo proyectado S7 = (S1 + S2 + S3 + S4 + S5 + S6) / 6",
-        language="text",
+    formula_left, formula_right = st.columns(2)
+    with formula_left:
+        st.markdown("#### 1. Necesidad en unidad base")
+        st.code(
+            "necesidad real = máximo(consumo proyectado - inventario actual, 0)",
+            language="text",
+        )
+        st.caption(
+            "Si el inventario ya cubre el consumo esperado, la necesidad de compra es cero."
+        )
+
+    with formula_right:
+        st.markdown("#### 2. Formatos completos")
+        st.code(
+            "formatos recomendados = redondear hacia arriba(\n"
+            "    necesidad real / unidad base por formato\n"
+            ")",
+            language="text",
+        )
+        st.caption("Se redondea hacia arriba porque no existe medio saco o media caja.")
+
+    st.markdown("#### Regla de redondeo del reto")
+    st.info(
+        "Pedir exactamente los formatos recomendados es correcto, aunque la cantidad "
+        "comprada supere un poco la necesidad. Solo existe sobrepedido cuando se agrega "
+        "al menos un formato completo adicional."
     )
 
-    left, right = st.columns(2)
-    with left:
-        st.markdown("#### Por qué empezamos con un promedio")
-        st.markdown(
-            "- Es transparente y fácil de comprobar.\n"
-            "- Nos da una línea base para comparar modelos futuros.\n"
-            "- Permite terminar primero la lógica central del negocio.\n"
-            "- Evita usar un modelo complejo sin demostrar que mejora el resultado."
-        )
+    if purchase_analysis is not None:
+        summary = purchase_analysis.summary()
+        result_columns = st.columns(5)
+        result_columns[0].metric("Correctos", summary["CORRECTO"])
+        result_columns[1].metric("Faltantes", summary["FALTANTE"])
+        result_columns[2].metric("Omitidos", summary["OMITIDO"])
+        result_columns[3].metric("Sobrepedidos", summary["SOBREPEDIDO"])
+        result_columns[4].metric("Datos inválidos", summary["DATO_INVALIDO"])
 
-    with right:
-        st.markdown("#### Limitación importante")
-        st.info(
-            "Un valor atípico puede alterar mucho el promedio. Por ejemplo, si una "
-            "semana tuvo un consumo anormalmente alto, el modelo base lo incluirá. "
-            "Eso no es un error de programación: es una limitación conocida que "
-            "mejoraremos en los extras."
-        )
-
-    if forecast is not None:
-        st.markdown("#### Resultado general")
-        result_columns = st.columns(4)
-        result_columns[0].metric("Proyecciones", forecast.total_projections)
-        result_columns[1].metric("Sucursales", forecast.branch_count)
-        result_columns[2].metric("Ingredientes", forecast.ingredient_count)
-        result_columns[3].metric("Históricos incompletos", forecast.incomplete_count)
-
-    st.markdown("#### Qué todavía no hacemos")
+    st.markdown("#### Qué viene después")
     st.write(
-        "Aún no descontamos inventario, no convertimos formatos de compra y no "
-        "decidimos si una orden está correcta. Esa será la Fase 3."
+        "La Fase 4 convertirá este motor en un dashboard ejecutivo más visual, con "
+        "filtros avanzados, prioridades, una tabla optimizada y un pedido corregido "
+        "descargable."
     )
 
 with forecast_tab:
@@ -115,6 +136,7 @@ with forecast_tab:
             "Filtrar sucursales",
             options=branch_options,
             default=branch_options,
+            key="forecast_branches",
         )
 
         filtered = projections.loc[projections["sucursal"].isin(selected_branches)].copy()
@@ -162,7 +184,11 @@ with forecast_tab:
         st.subheader("Explicación visual de una proyección")
         chart_left, chart_right = st.columns(2)
         with chart_left:
-            selected_branch = st.selectbox("Sucursal", options=branch_options)
+            selected_branch = st.selectbox(
+                "Sucursal",
+                options=branch_options,
+                key="forecast_detail_branch",
+            )
         available_ingredients = projections.loc[
             projections["sucursal"].eq(selected_branch),
             ["ingrediente_id", "nombre"],
@@ -176,6 +202,7 @@ with forecast_tab:
                 "Ingrediente",
                 options=list(ingredient_labels),
                 format_func=lambda value: ingredient_labels.get(value, value),
+                key="forecast_detail_ingredient",
             )
 
         chart_data = get_history_with_projection(
@@ -221,8 +248,131 @@ with forecast_tab:
             f"Para **{ingredient_labels[selected_ingredient]}** en **{selected_branch}**, "
             f"el promedio histórico es **{selected_projection['consumo_promedio']:.2f} "
             f"{selected_projection['unidad_base']}**. Por eso la proyección de S7 es "
-            f"esa misma cantidad."
+            "esa misma cantidad."
         )
+
+with analysis_tab:
+    st.subheader("Comparación de la orden contra la necesidad real")
+
+    if purchase_analysis is None:
+        st.error("El análisis no puede calcularse hasta corregir los errores de datos.")
+    elif purchase_analysis.analysis.empty:
+        st.warning("No existen combinaciones suficientes para analizar las órdenes.")
+    else:
+        analysis = purchase_analysis.analysis.copy()
+        branch_options = sorted(analysis["sucursal"].dropna().unique().tolist())
+        status_options = [
+            "DATO_INVALIDO",
+            "OMITIDO",
+            "FALTANTE",
+            "SOBREPEDIDO",
+            "CORRECTO",
+        ]
+
+        filter_left, filter_right = st.columns(2)
+        with filter_left:
+            selected_branches = st.multiselect(
+                "Sucursales",
+                options=branch_options,
+                default=branch_options,
+                key="analysis_branches",
+            )
+        with filter_right:
+            selected_statuses = st.multiselect(
+                "Estados",
+                options=status_options,
+                default=status_options,
+                key="analysis_statuses",
+            )
+
+        filtered = analysis.loc[
+            analysis["sucursal"].isin(selected_branches)
+            & analysis["estado"].isin(selected_statuses)
+        ].copy()
+        display = filtered.rename(
+            columns={
+                "prioridad": "Prioridad",
+                "estado": "Estado",
+                "sucursal": "Sucursal",
+                "nombre": "Ingrediente",
+                "proveedor": "Proveedor",
+                "consumo_proyectado": "Proyección",
+                "inventario_actual": "Inventario",
+                "necesidad_real": "Necesidad real",
+                "formatos_solicitados": "Formatos pedidos",
+                "formatos_recomendados": "Formatos recomendados",
+                "formato_compra": "Formato",
+                "accion_recomendada": "Acción recomendada",
+            }
+        )
+        st.dataframe(
+            display[
+                [
+                    "Prioridad",
+                    "Estado",
+                    "Sucursal",
+                    "Ingrediente",
+                    "Proveedor",
+                    "Proyección",
+                    "Inventario",
+                    "Necesidad real",
+                    "Formatos pedidos",
+                    "Formatos recomendados",
+                    "Formato",
+                    "Acción recomendada",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Proyección": st.column_config.NumberColumn(format="%.2f"),
+                "Inventario": st.column_config.NumberColumn(format="%.2f"),
+                "Necesidad real": st.column_config.NumberColumn(format="%.2f"),
+                "Formatos pedidos": st.column_config.NumberColumn(format="%.0f"),
+                "Formatos recomendados": st.column_config.NumberColumn(format="%.0f"),
+            },
+        )
+
+        st.divider()
+        st.subheader("Entender un cálculo paso a paso")
+        detail_options = analysis.index.tolist()
+        selected_index = st.selectbox(
+            "Selecciona una línea",
+            options=detail_options,
+            format_func=lambda index: (
+                f"{analysis.loc[index, 'sucursal']} · "
+                f"{analysis.loc[index, 'nombre']} · {analysis.loc[index, 'estado']}"
+            ),
+        )
+        detail = analysis.loc[selected_index]
+
+        if detail["estado"] == "DATO_INVALIDO":
+            st.error(detail["mensaje"])
+        else:
+            calc_columns = st.columns(4)
+            calc_columns[0].metric("Proyección S7", f"{detail['consumo_proyectado']:.2f}")
+            calc_columns[1].metric("Inventario", f"{detail['inventario_actual']:.2f}")
+            calc_columns[2].metric("Necesidad real", f"{detail['necesidad_real']:.2f}")
+            calc_columns[3].metric(
+                "Formatos recomendados",
+                f"{int(detail['formatos_recomendados'])}",
+            )
+            st.code(
+                f"necesidad real = max({detail['consumo_proyectado']:.2f} "
+                f"- {detail['inventario_actual']:.2f}, 0)\n"
+                f"necesidad real = {detail['necesidad_real']:.2f} "
+                f"{detail['unidad_base']}\n\n"
+                f"formatos recomendados = ceil({detail['necesidad_real']:.2f} "
+                f"/ {detail['unidad_base_por_formato']:.2f})\n"
+                f"formatos recomendados = {int(detail['formatos_recomendados'])}",
+                language="text",
+            )
+            if detail["estado"] == "CORRECTO":
+                st.success(detail["mensaje"])
+            elif detail["estado"] == "SOBREPEDIDO":
+                st.warning(detail["mensaje"])
+            else:
+                st.error(detail["mensaje"])
 
 with issues_tab:
     st.subheader("Detalle de calidad de datos")

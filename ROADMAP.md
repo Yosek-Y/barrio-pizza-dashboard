@@ -42,7 +42,7 @@ Entregables:
 
 **Terminado cuando:** cada combinación válida tiene una proyección reproducible y explicable.
 
-## Fase 3 — Necesidad real y motor de alertas
+## Fase 3 — Necesidad real y motor de alertas ✅
 
 **Objetivo:** resolver correctamente la lógica principal del reto.
 
@@ -53,6 +53,8 @@ Entregables:
 - Estados: correcto, faltante, sobrepedido, omitido y dato inválido.
 - Mensajes accionables.
 - Pruebas de límites y redondeo.
+
+**Estado:** implementada y cubierta por pruebas unitarias.
 
 **Terminado cuando:** las alertas cumplen la regla de que un excedente menor a un formato completo es redondeo normal.
 

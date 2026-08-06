@@ -14,11 +14,13 @@ def test_required_project_files_exist() -> None:
         "scripts/check_setup.py",
         "SETUP_WINDOWS.md",
         "FASE_2_EXPLICADA.md",
+        "FASE_3_EXPLICADA.md",
         "src/data_loader.py",
         "src/validations.py",
         "src/forecasting.py",
         "tests/test_data_validation.py",
         "tests/test_forecasting.py",
+        "tests/test_purchase_analysis.py",
     )
 
     missing = [item for item in required if not (root / item).exists()]
