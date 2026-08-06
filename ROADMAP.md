@@ -1,6 +1,6 @@
 # Plan de trabajo por fases
 
-## Fase 0 — Repositorio y entorno
+## Fase 0 — Repositorio y entorno ✅
 
 **Objetivo:** dejar una base reproducible y ordenada.
 
@@ -13,7 +13,7 @@ Entregables:
 
 **Terminado cuando:** otra persona puede clonar el proyecto, instalarlo y abrir la pantalla inicial siguiendo el README.
 
-## Fase 1 — Carga y validación de datos
+## Fase 1 — Carga y validación de datos ✅
 
 **Objetivo:** leer los cuatro CSV sin depender de tablas crudas ni asumir que los datos son perfectos.
 
@@ -23,6 +23,8 @@ Entregables:
 - Conversión de columnas numéricas.
 - Detección de duplicados, nulos, valores negativos e ingredientes desconocidos.
 - Pruebas unitarias de validación.
+
+**Estado:** implementada y cubierta por pruebas unitarias.
 
 **Terminado cuando:** el sistema carga los datos oficiales y reporta claramente cualquier problema sin cerrarse.
 
