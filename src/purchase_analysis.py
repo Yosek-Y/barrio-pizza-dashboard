@@ -46,6 +46,30 @@ ANALYSIS_COLUMNS = (
     "mensaje",
 )
 
+CORRECTED_ORDER_COLUMNS = (
+    "sucursal",
+    "proveedor",
+    "ingrediente_id",
+    "nombre",
+    "unidad_base",
+    "formato_compra",
+    "formatos_solicitados",
+    "formatos_recomendados",
+    "ajuste_formatos",
+    "estado",
+    "accion_recomendada",
+)
+
+SUPPLIER_SUMMARY_COLUMNS = (
+    "proveedor",
+    "sucursal",
+    "lineas",
+    "formatos_actuales",
+    "formatos_recomendados",
+    "ajuste_neto_formatos",
+    "lineas_con_cambio",
+)
+
 
 @dataclass(frozen=True)
 class PurchaseAnalysisResult:
@@ -82,6 +106,70 @@ class PurchaseAnalysisResult:
     def summary(self) -> dict[str, int]:
         """Resumen estable para métricas, pruebas y futuras exportaciones."""
         return {status: self.count(status) for status in STATUS_ORDER}
+
+    def corrected_order(self) -> pd.DataFrame:
+        """Versión recomendada del pedido para operación y descarga.
+
+        Reglas:
+        - excluye datos inválidos porque no pueden aprobarse automáticamente;
+        - excluye líneas cuya recomendación final es cero formatos;
+        - conserva cuántos formatos se pidieron, cuántos se recomiendan y el ajuste neto.
+        """
+        if self.analysis.empty:
+            return pd.DataFrame(columns=CORRECTED_ORDER_COLUMNS)
+
+        frame = self.analysis.copy()
+        valid_mask = ~frame["estado"].eq("DATO_INVALIDO")
+        positive_recommendation = frame["formatos_recomendados"].fillna(0).gt(0)
+        corrected = frame.loc[valid_mask & positive_recommendation].copy()
+        if corrected.empty:
+            return pd.DataFrame(columns=CORRECTED_ORDER_COLUMNS)
+
+        corrected["ajuste_formatos"] = (
+            corrected["formatos_recomendados"].fillna(0)
+            - corrected["formatos_solicitados"].fillna(0)
+        ).astype("Float64")
+
+        corrected = corrected.reindex(columns=CORRECTED_ORDER_COLUMNS)
+        corrected = corrected.sort_values(
+            ["proveedor", "sucursal", "nombre", "ingrediente_id"],
+            na_position="last",
+        ).reset_index(drop=True)
+        return corrected
+
+    def supplier_summary(self) -> pd.DataFrame:
+        """Agrupa el pedido corregido por proveedor y sucursal."""
+        corrected = self.corrected_order()
+        if corrected.empty:
+            return pd.DataFrame(columns=SUPPLIER_SUMMARY_COLUMNS)
+
+        summary = (
+            corrected.groupby(["proveedor", "sucursal"], dropna=False)
+            .agg(
+                lineas=("ingrediente_id", "count"),
+                formatos_actuales=("formatos_solicitados", "sum"),
+                formatos_recomendados=("formatos_recomendados", "sum"),
+                ajuste_neto_formatos=("ajuste_formatos", "sum"),
+                lineas_con_cambio=(
+                    "ajuste_formatos",
+                    lambda values: int((pd.Series(values).fillna(0) != 0).sum()),
+                ),
+            )
+            .reset_index()
+        )
+
+        numeric_columns = (
+            "formatos_actuales",
+            "formatos_recomendados",
+            "ajuste_neto_formatos",
+        )
+        for column in numeric_columns:
+            summary[column] = pd.to_numeric(summary[column], errors="coerce").round(2)
+
+        return summary.reindex(columns=SUPPLIER_SUMMARY_COLUMNS).sort_values(
+            ["proveedor", "sucursal"],
+            na_position="last",
+        ).reset_index(drop=True)
 
 
 def _empty_analysis() -> pd.DataFrame:

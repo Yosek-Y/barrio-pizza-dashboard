@@ -406,8 +406,8 @@ def _validate_omitted_order_lines(cleaned: DataBundle) -> list[ValidationIssue]:
             code="LINEA_ORDEN_OMITIDA",
             dataset="orden_compra",
             message=(
-                "Hay combinaciones con histórico que no aparecen en la orden. "
-                "La Fase 3 determinará si realmente requieren compra."
+                "Existen combinaciones con consumo histórico registrado que no aparecen en la orden semanal. "
+                "Deben validarse para confirmar si corresponden a reposición, cambios operativos o excepciones controladas."
             ),
             row_count=int(missing_mask.sum()),
             examples=_examples(merged, tuple(keys), missing_mask),

@@ -1,29 +1,25 @@
 # Barrio Pizza AI Dashboard
 
-Dashboard para analizar las órdenes de compra semanales de las sucursales de Barrio Pizza, proyectar el consumo y detectar faltantes, omisiones, sobrepedidos y datos inválidos.
+Dashboard administrativo para revisar las órdenes de compra semanales de Barrio Pizza, proyectar el consumo, considerar el inventario disponible y detectar faltantes, omisiones, sobrepedidos y datos inválidos.
 
-## Estado del proyecto
+> Este README funciona como documentación central del proyecto y se completará para la entrega final.
 
-**Fase 3 — Necesidad real y motor de alertas terminada.**
+## Estado actual
 
 La aplicación actualmente:
 
-1. carga y valida los cuatro CSV;
-2. proyecta S7 mediante el promedio histórico;
-3. descuenta el inventario actual;
-4. convierte la necesidad a formatos completos;
+1. carga y valida los cuatro CSV del reto;
+2. proyecta el consumo de la próxima semana con el promedio histórico disponible;
+3. descuenta el inventario actual para calcular la necesidad real;
+4. convierte la necesidad a formatos completos de compra;
 5. compara la recomendación con la orden semanal;
-6. genera un estado, una acción y un mensaje explicativo.
+6. clasifica cada línea como `CORRECTO`, `FALTANTE`, `OMITIDO`, `SOBREPEDIDO` o `DATO_INVALIDO`;
+7. muestra el análisis en un dashboard administrativo responsive;
+8. permite revisar prioridades, pronósticos, datos fuente y calidad de datos;
+9. permite descargar el pedido recomendado y un resumen por proveedor;
+10. incluye pruebas automáticas sobre la lógica y los casos intencionales de los datos oficiales.
 
-Estados disponibles:
-
-- `CORRECTO`;
-- `FALTANTE`;
-- `OMITIDO`;
-- `SOBREPEDIDO`;
-- `DATO_INVALIDO`.
-
-La regla principal de redondeo está implementada: un excedente menor que un formato completo es normal. Solo se considera sobrepedido cuando la sucursal solicita al menos un formato completo adicional frente a la recomendación.
+La regla principal de redondeo está implementada: un excedente menor que un formato completo se considera redondeo normal. Solo se marca sobrepedido cuando se solicita al menos un formato completo adicional frente a la recomendación.
 
 ## Tecnologías
 
@@ -33,11 +29,9 @@ La regla principal de redondeo está implementada: un excedente menor que un for
 - Plotly
 - Pytest
 
-## Primera instalación en Windows
+## Instalación en Windows
 
-La guía detallada para principiantes está en [`SETUP_WINDOWS.md`](SETUP_WINDOWS.md).
-
-Resumen desde la carpeta del proyecto:
+Desde la carpeta del proyecto:
 
 ```powershell
 py -m venv .venv
@@ -50,50 +44,54 @@ python -m pytest
 python -m streamlit run app.py
 ```
 
-## Uso diario en `C:\Proyecto_Barrio_Pizza`
+Si PowerShell bloquea la activación del entorno virtual, puede habilitarse temporalmente para esa consola con:
 
-Abrir la carpeta:
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+
+## Uso diario
 
 ```powershell
 cd C:\Proyecto_Barrio_Pizza
-```
-
-Activar el entorno:
-
-```powershell
 .\.venv\Scripts\Activate.ps1
-```
-
-Ejecutar las pruebas:
-
-```powershell
-python -m pytest
-```
-
-Ejecutar la aplicación:
-
-```powershell
 python -m streamlit run app.py
 ```
 
-Detener Streamlit:
+Para detener Streamlit:
 
 ```text
 Ctrl + C
 ```
 
-## Fórmulas actuales
+## Verificación de calidad
 
-### Proyección
+Ejecutar las pruebas automáticas:
+
+```powershell
+python -m pytest
+```
+
+Ejecutar el chequeo integral de los CSV oficiales:
+
+```powershell
+python scripts/run_quality_checks.py
+```
+
+Actualmente el proyecto cuenta con **27 pruebas automáticas**.
+
+## Fórmulas principales
+
+### Proyección de consumo
 
 ```text
-consumo proyectado S7 = promedio de S1 a S6
+consumo proyectado = promedio del consumo histórico disponible
 ```
 
 ### Necesidad real
 
 ```text
-necesidad real = máximo(consumo proyectado - inventario actual, 0)
+necesidad real = max(consumo proyectado - inventario actual, 0)
 ```
 
 ### Formatos recomendados
@@ -102,22 +100,20 @@ necesidad real = máximo(consumo proyectado - inventario actual, 0)
 formatos recomendados = ceil(necesidad real / unidad base por formato)
 ```
 
-## Estructura
+## Estructura principal
 
 ```text
 barrio-pizza-ai-dashboard/
 ├── app.py
 ├── README.md
-├── ROADMAP.md
-├── FASE_2_EXPLICADA.md
-├── FASE_3_EXPLICADA.md
-├── SETUP_WINDOWS.md
 ├── requirements.txt
 ├── pyproject.toml
+├── assets/
 ├── datos/
 ├── scripts/
 │   ├── check_setup.py
-│   └── download_data.py
+│   ├── download_data.py
+│   └── run_quality_checks.py
 ├── src/
 │   ├── data_loader.py
 │   ├── forecasting.py
@@ -126,32 +122,16 @@ barrio-pizza-ai-dashboard/
 └── tests/
     ├── test_data_validation.py
     ├── test_forecasting.py
-    ├── test_purchase_analysis.py
-    └── test_project_structure.py
+    ├── test_integration_official_data.py
+    ├── test_phase4_exports.py
+    ├── test_project_structure.py
+    └── test_purchase_analysis.py
 ```
-
-## Pruebas
-
-La Fase 3 incluye 19 pruebas automáticas. Entre otros casos, verifican:
-
-- valores inválidos y negativos;
-- ingredientes desconocidos;
-- históricos incompletos;
-- promedio de seis semanas;
-- faltante de compra;
-- orden omitida;
-- sobrepedido de un formato completo;
-- redondeo normal sin falsas alertas.
-
-## Documentación para principiantes
-
-- [`FASE_2_EXPLICADA.md`](FASE_2_EXPLICADA.md): cómo funciona la proyección.
-- [`FASE_3_EXPLICADA.md`](FASE_3_EXPLICADA.md): necesidad, formatos y alertas.
-
-## Siguiente fase
-
-La Fase 4 transformará los resultados en un dashboard ejecutivo con mejor jerarquía visual, filtros, prioridades y pedido corregido descargable.
 
 ## Fuente de los datos
 
-Los CSV pertenecen al reto técnico público de Barrio Pizza: `soydelbarrio/reto-practicante-ia`.
+Los CSV utilizados corresponden al reto técnico público de Barrio Pizza, repositorio `soydelbarrio/reto-practicante-ia`.
+
+## Pendiente para la entrega final
+
+Al cerrar el proyecto, este mismo README se ampliará con la arquitectura, decisiones técnicas, uso de IA, integración propuesta con Odoo, despliegue y enlace final del dashboard.

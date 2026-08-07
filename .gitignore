@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.tmp_pytest/
 .ruff_cache/
 .streamlit/secrets.toml
 .DS_Store
