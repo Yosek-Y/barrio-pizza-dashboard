@@ -13,14 +13,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.data_loader import load_data_bundle
-from src.forecasting import build_baseline_forecast
+from src.forecasting import build_smart_forecast
 from src.purchase_analysis import analyze_orders
+from src.redistribution import optimize_redistribution
 from src.validations import validate_data
 
 EXPECTED_WARNINGS = {"INGREDIENTE_DESCONOCIDO", "LINEA_ORDEN_OMITIDA"}
 EXPECTED_STATUS_COUNTS = {
-    "CORRECTO": 83,
-    "FALTANTE": 2,
+    "CORRECTO": 84,
+    "FALTANTE": 1,
     "SOBREPEDIDO": 2,
     "DATO_INVALIDO": 1,
     "OMITIDO": 1,
@@ -45,7 +46,7 @@ def main() -> int:
         print(f"[FALLO] Advertencias inesperadas: {sorted(warning_codes)}")
         return 1
 
-    forecast = build_baseline_forecast(report.cleaned_data)
+    forecast = build_smart_forecast(report.cleaned_data)
     result = analyze_orders(report.cleaned_data, forecast)
     actual_counts = Counter(result.analysis["estado"].tolist())
 
@@ -63,7 +64,7 @@ def main() -> int:
         ("Brisas del Golf", "mozzarella", "OMITIDO"),
         ("Costa del Este", "aji_chombo", "DATO_INVALIDO"),
         ("Costa del Este", "harina", "FALTANTE"),
-        ("Marbella", "pepperoni", "FALTANTE"),
+        ("Marbella", "pepperoni", "CORRECTO"),
         ("Brisas del Golf", "cebolla", "SOBREPEDIDO"),
         ("Via Argentina", "albahaca", "SOBREPEDIDO"),
     ]
@@ -83,7 +84,14 @@ def main() -> int:
         if marker == "FALLO":
             return 1
 
-    print("\nRESULTADO: OK · Los datos oficiales y el motor mantienen el comportamiento esperado.")
+    redistribution = optimize_redistribution(result.analysis)
+    print("\nRedistribución interna:")
+    print(f"  [{'OK' if redistribution.formats_avoided == 3 else 'FALLO'}] Formatos evitados: {redistribution.formats_avoided} (esperado 3)")
+    print(f"  [{'OK' if redistribution.product_count == 2 else 'FALLO'}] Productos balanceados: {redistribution.product_count} (esperado 2)")
+    if redistribution.formats_avoided != 3 or redistribution.product_count != 2:
+        return 1
+
+    print("\nRESULTADO: OK · Los datos oficiales, el pronóstico inteligente y la redistribución mantienen el comportamiento esperado.")
     return 0
 
 

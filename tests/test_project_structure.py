@@ -16,10 +16,20 @@ def test_required_project_files_exist() -> None:
         "src/validations.py",
         "src/forecasting.py",
         "src/purchase_analysis.py",
+        "src/order_workspace.py",
+        "src/anomaly_detection.py",
+        "src/data_chat.py",
+        "src/redistribution.py",
+        "assets/Anomalias_barrio.jpg",
+        "assets/pizzia_icon.png",
         "tests/test_data_validation.py",
         "tests/test_forecasting.py",
         "tests/test_purchase_analysis.py",
         "tests/test_integration_official_data.py",
+        "tests/test_order_workspace.py",
+        "tests/test_cross_branch_anomalies.py",
+        "tests/test_data_chat.py",
+        "tests/test_redistribution.py",
     )
 
     missing = [item for item in required if not (root / item).exists()]

@@ -14,9 +14,13 @@ import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 
+from src.anomaly_detection import detect_cross_branch_anomalies
+from src.data_chat import DEFAULT_MODEL, answer_locally, ask_gemini, build_chat_context
 from src.data_loader import DATASET_FILES, load_data_bundle
-from src.forecasting import build_baseline_forecast, get_history_with_projection
+from src.forecasting import build_smart_forecast, get_history_with_projection
 from src.purchase_analysis import analyze_orders
+from src.redistribution import optimize_redistribution
+from src.order_workspace import ORDER_COLUMNS, editor_frame, missing_order_columns, normalize_order_frame, with_order
 from src.validations import validate_data
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -28,23 +32,30 @@ ASSET_SLOTS = {
     "overview": ASSETS_DIR / "panel_general.png",
     "alerts": ASSETS_DIR / "revision_ordenes.png",
     "corrected": ASSETS_DIR / "pedido_recomendado.png",
+    "redistribution": ASSETS_DIR / "pedido_recomendado.png",
     "forecast": ASSETS_DIR / "pronostico.png",
+    "anomalies": ASSETS_DIR / "Anomalias_barrio.jpg",
+    "pizzia_icon": ASSETS_DIR / "pizzia_icon.png",
     "quality": ASSETS_DIR / "calidad_datos.png",
 }
 
-PAGE_OPTIONS = ["Resumen", "Órdenes", "Recomendado", "Pronóstico", "Datos"]
+PAGE_OPTIONS = ["Resumen", "Órdenes", "Recomendado", "Redistribución", "Pronóstico", "Anomalías", "Datos"]
 PAGE_SHORT = {
     "Resumen": "RES",
     "Órdenes": "ORD",
     "Recomendado": "REC",
+    "Redistribución": "MOV",
     "Pronóstico": "PRO",
+    "Anomalías": "ANO",
     "Datos": "DAT",
 }
 PAGE_SLUG = {
     "Resumen": "resumen",
     "Órdenes": "ordenes",
     "Recomendado": "recomendado",
+    "Redistribución": "redistribucion",
     "Pronóstico": "pronostico",
+    "Anomalías": "anomalias",
     "Datos": "datos",
 }
 PAGE_FROM_SLUG = {value: key for key, value in PAGE_SLUG.items()}
@@ -394,6 +405,143 @@ def inject_css() -> None:
         .highlight-card .highlight-list {
             display:grid;gap:.5rem;color:#3F3B37;font-size:.96rem;line-height:1.45;
         }
+        .order-workspace {
+            background:#171717;color:white;border-radius:20px;padding:1rem 1.15rem;
+            margin:.35rem 0 1rem;box-shadow:0 10px 24px rgba(0,0,0,.08);
+        }
+        .order-workspace .workspace-kicker {
+            color:#FF655B;font-size:.7rem;font-weight:800;letter-spacing:.14rem;text-transform:uppercase;
+        }
+        .order-workspace .workspace-title {
+            font-family:'Bebas Neue','Arial Narrow',sans-serif;font-size:1.8rem;line-height:1;
+            letter-spacing:.04rem;margin:.25rem 0;color:white;
+        }
+        .order-workspace .workspace-text {color:#D8D3CD;font-size:.84rem;line-height:1.5;}
+        .source-pill {
+            display:inline-flex;align-items:center;gap:.35rem;padding:.28rem .58rem;border-radius:999px;
+            background:#F1EEE9;color:#514C47;font-size:.72rem;font-weight:800;text-transform:uppercase;
+            letter-spacing:.04rem;margin:.1rem 0 .55rem;
+        }
+        .source-pill.custom {background:#FCE8E6;color:#A71919;}
+
+        /* PizzIA · asistente persistente */
+        .pizzia-panel-head {
+            display:grid;grid-template-columns:72px minmax(0,1fr);gap:.75rem;align-items:center;
+            margin:.15rem 0 .35rem;
+        }
+        .pizzia-panel-logo {
+            width:68px;height:68px;object-fit:cover;border-radius:18px;display:block;
+            border:1px solid rgba(255,255,255,.13);box-shadow:0 8px 22px rgba(0,0,0,.25);
+        }
+        .pizzia-panel-brand {
+            font-family:'Bebas Neue','Arial Narrow',sans-serif;font-size:1.75rem;line-height:.95;
+            color:#FFFFFF;letter-spacing:.04rem;
+        }
+        .pizzia-panel-brand span {color:#E2372E;}
+        .pizzia-panel-tagline {font-size:.78rem;color:#BEB8B1;line-height:1.35;margin-top:.25rem;}
+        .pizzia-mode {
+            background:#262626;border:1px solid rgba(255,255,255,.08);border-radius:13px;padding:.65rem .72rem;
+            font-size:.72rem;line-height:1.45;color:#E5E0DA;text-align:left;margin:.15rem 0 .25rem;
+        }
+        .pizzia-mode strong {color:#FFFFFF;}
+        .pizzia-mode .online {color:#6FD5A9;font-weight:800;}
+        .pizzia-mode .local {color:#FFB14A;font-weight:800;}
+        .pizzia-suggestions {font-size:.66rem;font-weight:800;letter-spacing:.08rem;text-transform:uppercase;color:#AFA8A0;margin:.35rem 0 .05rem;}
+
+        .st-key-pizzia_launcher {
+            position:fixed!important;right:22px!important;bottom:22px!important;z-index:1850!important;
+            width:88px!important;background:#171717!important;border:1px solid rgba(255,255,255,.10)!important;
+            border-radius:22px!important;padding:.5rem!important;box-shadow:0 16px 38px rgba(0,0,0,.28)!important;
+        }
+        .st-key-pizzia_launcher img {
+            width:58px;height:58px;object-fit:cover;border-radius:16px;display:block;margin:0 auto .3rem;
+        }
+        .st-key-pizzia_launcher button {
+            min-height:28px!important;padding:.22rem .3rem!important;border-radius:9px!important;
+            background:#E2372E!important;border-color:#E2372E!important;color:#FFFFFF!important;
+            font-size:.62rem!important;font-weight:800!important;letter-spacing:.04rem!important;
+        }
+        .st-key-pizzia_launcher button p {color:#FFFFFF!important;font-size:.62rem!important;}
+
+        .st-key-pizzia_drawer {
+            position:fixed!important;right:14px!important;top:64px!important;bottom:14px!important;z-index:1800!important;
+            width:410px!important;max-width:calc(100vw - 28px)!important;overflow-y:auto!important;overflow-x:hidden!important;
+            background:#171717!important;border:1px solid rgba(255,255,255,.09)!important;border-radius:22px!important;
+            padding:.9rem .9rem 1rem!important;box-shadow:0 22px 60px rgba(0,0,0,.34)!important;
+            scrollbar-width:thin;scrollbar-color:#4B4743 #1F1F1F;
+        }
+        .st-key-pizzia_drawer [data-testid="stVerticalBlock"] {gap:.55rem!important;}
+        .st-key-pizzia_drawer p,.st-key-pizzia_drawer label,.st-key-pizzia_drawer span,.st-key-pizzia_drawer h1,.st-key-pizzia_drawer h2,.st-key-pizzia_drawer h3 {
+            color:#F7F4EF;
+        }
+        .st-key-pizzia_drawer button {
+            border-radius:10px!important;border:1px solid rgba(255,255,255,.12)!important;background:#292929!important;color:#FFFFFF!important;
+        }
+        .st-key-pizzia_drawer button:hover {border-color:#E2372E!important;background:#303030!important;}
+        .st-key-pizzia_drawer button p {color:#FFFFFF!important;font-size:.72rem!important;line-height:1.25!important;}
+
+        /* Botón cerrar PizzIA: permanece visible aunque el chat haga scroll. */
+        .st-key-pizzia_close_button {
+            position:fixed!important;
+            top:76px!important;
+            right:28px!important;
+            z-index:1950!important;
+            width:42px!important;
+            height:42px!important;
+            margin:0!important;
+        }
+        .st-key-pizzia_close_button button {
+            width:42px!important;
+            min-width:42px!important;
+            height:42px!important;
+            min-height:42px!important;
+            padding:0!important;
+            border-radius:999px!important;
+            background:#E2372E!important;
+            border:1px solid rgba(255,255,255,.18)!important;
+            color:#FFFFFF!important;
+            box-shadow:0 8px 22px rgba(0,0,0,.38)!important;
+        }
+        .st-key-pizzia_close_button button:hover {
+            background:#C92E27!important;
+            border-color:#FFFFFF!important;
+        }
+        .st-key-pizzia_close_button button p {
+            color:#FFFFFF!important;
+            font-size:1.05rem!important;
+            line-height:1!important;
+        }
+        .st-key-pizzia_drawer [data-testid="stChatMessage"] {
+            background:#242424!important;border:1px solid rgba(255,255,255,.08)!important;border-radius:15px!important;
+            padding:.25rem .38rem!important;
+        }
+        .st-key-pizzia_drawer [data-testid="stChatMessage"] p {font-size:.82rem!important;line-height:1.48!important;}
+        .st-key-pizzia_drawer [data-testid="stChatMessage"] *,
+        .st-key-pizzia_drawer [data-testid="stChatMessage"] p,
+        .st-key-pizzia_drawer [data-testid="stChatMessage"] li,
+        .st-key-pizzia_drawer [data-testid="stChatMessage"] strong,
+        .st-key-pizzia_drawer [data-testid="stChatMessage"] em,
+        .st-key-pizzia_drawer [data-testid="stChatMessage"] a,
+        .st-key-pizzia_drawer [data-testid="stChatMessage"] code,
+        .st-key-pizzia_drawer [data-testid="stChatMessage"] h1,
+        .st-key-pizzia_drawer [data-testid="stChatMessage"] h2,
+        .st-key-pizzia_drawer [data-testid="stChatMessage"] h3,
+        .st-key-pizzia_drawer [data-testid="stChatMessage"] h4 {
+            color:#FFFFFF!important;
+        }
+        .st-key-pizzia_drawer [data-testid="stChatInput"] {
+            background:#222!important;border-radius:13px!important;border:1px solid rgba(255,255,255,.10)!important;
+        }
+        .st-key-pizzia_drawer textarea {color:#000000!important;font-size:.82rem!important;}
+        .st-key-pizzia_drawer textarea::placeholder {color:#6F6A64!important;opacity:1!important;}
+        .st-key-pizzia_drawer small,.st-key-pizzia_drawer [data-testid="stCaptionContainer"] p {color:#AFA9A2!important;font-size:.65rem!important;}
+        .pizzia-drawer-note {font-size:.68rem!important;color:#AFA9A2!important;line-height:1.4!important;}
+
+        @media(max-width:720px){
+            .st-key-pizzia_drawer {right:6px!important;top:54px!important;bottom:6px!important;width:calc(100vw - 12px)!important;max-width:none!important;border-radius:18px!important;}
+            .st-key-pizzia_launcher {right:12px!important;bottom:12px!important;}
+            .st-key-pizzia_close_button {top:64px!important;right:16px!important;}
+        }
 
         .stDataFrame,.stPlotlyChart {border-radius:14px;overflow:hidden;}
 
@@ -642,6 +790,217 @@ def csv_bytes(frame: pd.DataFrame) -> bytes:
     return frame.to_csv(index=False).encode("utf-8-sig")
 
 
+def get_pizzia_config() -> tuple[str | None, str]:
+    """Lee la configuración de PizzIA sin romper la app si no hay secrets."""
+    api_key: str | None = None
+    model = DEFAULT_MODEL
+    try:
+        api_key = str(st.secrets.get("GEMINI_API_KEY", "")).strip() or None
+        configured_model = str(st.secrets.get("PIZZIA_MODEL", "")).strip()
+        if configured_model:
+            model = configured_model
+    except Exception:
+        api_key = None
+    return api_key, model
+
+
+def order_fingerprint(frame: pd.DataFrame) -> str:
+    if frame is None or frame.empty:
+        return "empty"
+    work = frame.sort_values(list(frame.columns)).reset_index(drop=True)
+    return str(int(pd.util.hash_pandas_object(work, index=True).sum()))
+
+
+def render_pizzia_assistant(
+    analysis: pd.DataFrame,
+    forecast_frame: pd.DataFrame,
+    anomalies: pd.DataFrame,
+    supplier_summary: pd.DataFrame,
+    redistribution: pd.DataFrame,
+) -> None:
+    """Renderiza PizzIA como asistente lateral persistente en cualquier sección."""
+    if "pizzia_open" not in st.session_state:
+        st.session_state["pizzia_open"] = False
+
+    api_key, pizzia_model = get_pizzia_config()
+    chat_context = build_chat_context(
+        analysis,
+        forecast_frame,
+        anomalies,
+        supplier_summary,
+        active_order_source=str(st.session_state.get("active_order_source", "Orden activa")),
+        redistribution=redistribution,
+    )
+
+    current_fingerprint = order_fingerprint(st.session_state.get("active_order", pd.DataFrame()))
+    if st.session_state.get("pizzia_order_fingerprint") != current_fingerprint:
+        st.session_state["pizzia_order_fingerprint"] = current_fingerprint
+        st.session_state["pizzia_messages"] = [
+            {
+                "role": "assistant",
+                "content": (
+                    "¡Ey! Soy PizzIA 🍕. Estoy conectado a la orden activa. "
+                    "Pregúntame por alertas, ingredientes, sucursales, pronósticos, anomalías o redistribución interna."
+                ),
+                "mode": "system",
+            }
+        ]
+
+    if "pizzia_messages" not in st.session_state:
+        st.session_state["pizzia_messages"] = []
+
+    logo_uri = asset_data_uri(ASSET_SLOTS["pizzia_icon"])
+
+    if not st.session_state["pizzia_open"]:
+        with st.container(key="pizzia_launcher"):
+            if logo_uri:
+                st.markdown(
+                    f'<img src="{logo_uri}" alt="PizzIA" title="PizzIA · Pregúntale al Barrio">',
+                    unsafe_allow_html=True,
+                )
+            if st.button("ABRIR CHAT", key="pizzia_open_button", use_container_width=True):
+                st.session_state["pizzia_open"] = True
+                st.rerun()
+        return
+
+    with st.container(key="pizzia_drawer"):
+        top_left, top_right = st.columns([4.7, 1])
+        with top_left:
+            logo_html = (
+                f'<img class="pizzia-panel-logo" src="{logo_uri}" alt="Logo PizzIA">'
+                if logo_uri
+                else ""
+            )
+            st.markdown(
+                f"""
+                <div class="pizzia-panel-head">
+                    {logo_html}
+                    <div>
+                        <div class="pizzia-panel-brand">Pizz<span>IA</span></div>
+                        <div class="pizzia-panel-tagline"><strong>Pregúntale al Barrio.</strong><br>Consulta los datos sin salir de la sección que estás revisando.</div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with top_right:
+            if st.button("✕", key="pizzia_close_button", help="Minimizar PizzIA", use_container_width=True):
+                st.session_state["pizzia_open"] = False
+                st.rerun()
+
+        st.caption(f"Orden: {st.session_state.get('active_order_source', 'Orden activa')}")
+        if st.button("🗑️  Limpiar chat", key="pizzia_clear_chat", use_container_width=True):
+            st.session_state["pizzia_messages"] = [
+                {
+                    "role": "assistant",
+                    "content": "Conversación limpia. ¿Qué quieres revisar del estado actual de la compra?",
+                    "mode": "system",
+                }
+            ]
+            st.rerun()
+
+        st.markdown('<div class="pizzia-suggestions">Preguntas rápidas</div>', unsafe_allow_html=True)
+        suggestions = [
+            "¿Qué debería revisar primero?",
+            "¿Qué sucursal tiene más alertas?",
+            "¿Qué anomalías detectaste?",
+            "¿Qué puedo redistribuir antes de comprar?",
+        ]
+        suggestion_cols = st.columns(2)
+        pending_question: str | None = None
+        for idx, suggestion in enumerate(suggestions):
+            with suggestion_cols[idx % 2]:
+                if st.button(suggestion, key=f"pizzia_suggestion_drawer_{idx}", use_container_width=True):
+                    pending_question = suggestion
+
+        for message in st.session_state["pizzia_messages"]:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+                if message.get("mode") == "gemini":
+                    st.caption(f"PizzIA · {message.get('model', pizzia_model)} · datos activos")
+                elif message.get("mode") == "local":
+                    st.caption("PizzIA · modo local")
+
+        typed_question = st.chat_input(
+            "Pregúntale a PizzIA…",
+            key="pizzia_drawer_input",
+        )
+        question = pending_question or typed_question
+        if question:
+            st.session_state["pizzia_messages"].append(
+                {"role": "user", "content": question, "mode": "user"}
+            )
+            history_for_model = [
+                {"role": item["role"], "content": item["content"]}
+                for item in st.session_state["pizzia_messages"][:-1]
+                if item["role"] in {"user", "assistant"}
+            ]
+            try:
+                if api_key:
+                    answer = ask_gemini(
+                        api_key,
+                        question,
+                        chat_context,
+                        history=history_for_model,
+                        model=pizzia_model,
+                    )
+                else:
+                    answer = answer_locally(question, analysis, anomalies, supplier_summary, redistribution)
+            except Exception as exc:
+                answer = answer_locally(question, analysis, anomalies, supplier_summary, redistribution)
+                st.session_state["pizzia_last_error"] = str(exc)
+
+            st.session_state["pizzia_messages"].append(
+                {
+                    "role": "assistant",
+                    "content": answer.text,
+                    "mode": answer.mode,
+                    "model": answer.model,
+                }
+            )
+            st.rerun()
+
+        if st.session_state.get("pizzia_last_error"):
+            with st.expander("Estado de conexión"):
+                st.warning(
+                    "La IA generativa no respondió en el último intento. "
+                    "PizzIA usó el modo local para mantener el dashboard disponible."
+                )
+                st.code(st.session_state.pop("pizzia_last_error"), language="text")
+
+        st.markdown(
+            '<div class="pizzia-drawer-note">PizzIA responde únicamente con el contexto activo del dashboard. Si un dato no está disponible, debe indicarlo en lugar de inventarlo.</div>',
+            unsafe_allow_html=True,
+        )
+
+
+def apply_active_order(frame: pd.DataFrame, source: str) -> None:
+    st.session_state["active_order"] = normalize_order_frame(frame)
+    st.session_state["active_order_source"] = source
+    st.session_state["order_editor_version"] = st.session_state.get("order_editor_version", 0) + 1
+    st.session_state.pop("order_detail_line", None)
+    st.session_state.pop("order_detail_branch", None)
+    st.rerun()
+
+
+def reset_active_order(base_order: pd.DataFrame) -> None:
+    st.session_state["active_order"] = normalize_order_frame(base_order)
+    st.session_state["active_order_source"] = "Orden original"
+    st.session_state["order_editor_version"] = st.session_state.get("order_editor_version", 0) + 1
+    st.session_state.pop("order_detail_line", None)
+    st.session_state.pop("order_detail_branch", None)
+    st.rerun()
+
+
+def read_uploaded_order(uploaded_file) -> pd.DataFrame:
+    try:
+        uploaded_file.seek(0)
+        frame = pd.read_csv(uploaded_file, encoding="utf-8-sig", dtype="string")
+    except (pd.errors.EmptyDataError, pd.errors.ParserError, UnicodeDecodeError) as exc:
+        raise ValueError(f"No se pudo leer el CSV: {exc}") from exc
+    return frame
+
+
 def build_hallazgos_display() -> pd.DataFrame:
     dataset_labels = {
         "ingredientes": "Ingredientes",
@@ -783,27 +1142,39 @@ def make_donut(
 inject_css()
 
 try:
-    data = load_data_bundle()
+    base_data = load_data_bundle()
 except (FileNotFoundError, ValueError) as exc:
     st.error("No fue posible cargar los archivos operativos.")
     st.code(str(exc), language="text")
     st.code("python scripts/download_data.py\npython -m streamlit run app.py", language="powershell")
     st.stop()
 
+# La orden activa puede ser la original, una cargada por CSV o una edición manual.
+# Se conserva en session_state para que todo el dashboard se recalcule con la misma orden.
+if "active_order" not in st.session_state:
+    st.session_state["active_order"] = base_data.orden_compra.copy()
+    st.session_state["active_order_source"] = "Orden original"
+    st.session_state["order_editor_version"] = 0
+
+data = with_order(base_data, st.session_state["active_order"])
 report = validate_data(data)
 forecast = None
 purchase_result = None
 if not report.has_errors:
-    forecast = build_baseline_forecast(report.cleaned_data)
+    forecast = build_smart_forecast(report.cleaned_data)
     purchase_result = analyze_orders(report.cleaned_data, forecast)
 
 analysis = purchase_result.analysis.copy() if purchase_result is not None else pd.DataFrame()
 corrected_order = purchase_result.corrected_order() if purchase_result is not None else pd.DataFrame()
 supplier_summary = purchase_result.supplier_summary() if purchase_result is not None else pd.DataFrame()
+anomaly_result = detect_cross_branch_anomalies(analysis)
+redistribution_result = optimize_redistribution(analysis)
 
 requested_page = PAGE_FROM_SLUG.get(str(st.query_params.get("page", "")).strip().lower())
 if requested_page:
     st.session_state["nav_page"] = requested_page
+elif st.session_state.get("nav_page") not in PAGE_OPTIONS:
+    st.session_state["nav_page"] = "Resumen"
 elif "nav_page" not in st.session_state:
     st.session_state["nav_page"] = "Resumen"
     set_query_navigation("Resumen")
@@ -890,6 +1261,15 @@ with st.sidebar:
 
 render_collapsed_rail(current_page, alerts_count, actionable_count, data_view)
 render_location_header(current_page, data_view)
+
+forecast_context = forecast.projections.copy() if forecast is not None else pd.DataFrame()
+render_pizzia_assistant(
+    analysis,
+    forecast_context,
+    anomaly_result.anomalies,
+    supplier_summary,
+    redistribution_result.transfers,
+)
 
 # -----------------------------------------------------------------------------
 # RESUMEN
@@ -998,6 +1378,84 @@ elif current_page == "Órdenes":
     if scroll_target == PAGE_ANCHORS["Órdenes"]:
         emit_scroll_to(PAGE_ANCHORS["Órdenes"])
         st.session_state["_pending_scroll_target"] = None
+
+    active_source = st.session_state.get("active_order_source", "Orden original")
+    source_class = "" if active_source == "Orden original" else " custom"
+    st.markdown(
+        f"""
+        <div class="order-workspace">
+            <div class="workspace-kicker">Orden dinámica</div>
+            <div class="workspace-title">CARGA O AJUSTA LA ORDEN ANTES DE APROBARLA</div>
+            <div class="workspace-text">Analiza un CSV nuevo o modifica cantidades directamente. Al aplicar cambios, las alertas, recomendaciones y exportaciones se recalculan en todo el dashboard.</div>
+        </div>
+        <span class="source-pill{source_class}">Fuente activa · {html.escape(active_source)}</span>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("Gestionar orden semanal", expanded=False):
+        upload_tab, edit_tab = st.tabs(["Cargar CSV", "Editar orden"])
+
+        with upload_tab:
+            st.caption("El archivo debe contener las columnas: sucursal, ingrediente_id y cantidad_formatos. El CSV original del proyecto no se modifica.")
+            uploaded_order = st.file_uploader(
+                "Seleccionar orden de compra",
+                type=["csv"],
+                key="order_csv_upload",
+            )
+            if uploaded_order is not None:
+                try:
+                    uploaded_frame = read_uploaded_order(uploaded_order)
+                    missing = missing_order_columns(uploaded_frame)
+                    if missing:
+                        st.error("El archivo no puede usarse porque faltan columnas: " + ", ".join(missing))
+                    else:
+                        preview = normalize_order_frame(uploaded_frame)
+                        st.dataframe(preview.head(12), use_container_width=True, hide_index=True)
+                        st.caption(f"{len(preview)} líneas detectadas. Las validaciones completas se ejecutarán al aplicar el archivo.")
+                        if st.button("Usar este CSV y recalcular", type="primary", use_container_width=True, key="apply_uploaded_order"):
+                            apply_active_order(preview, f"CSV cargado · {uploaded_order.name}")
+                except ValueError as exc:
+                    st.error(str(exc))
+
+        with edit_tab:
+            st.caption("Puedes cambiar cantidades, eliminar líneas o agregar nuevas. Los formatos se manejan como unidades completas de compra.")
+            current_editor = editor_frame(st.session_state["active_order"], base_data.ingredientes)
+            branches_for_editor = sorted(
+                set(base_data.inventario_actual["sucursal"].dropna().astype(str))
+                | set(base_data.consumo_historico["sucursal"].dropna().astype(str))
+            )
+            ingredient_ids = sorted(base_data.ingredientes["ingrediente_id"].dropna().astype(str).unique().tolist())
+            edited_order = st.data_editor(
+                current_editor,
+                use_container_width=True,
+                hide_index=True,
+                num_rows="dynamic",
+                key=f"order_inline_editor_{st.session_state.get('order_editor_version', 0)}",
+                disabled=["nombre"],
+                column_config={
+                    "sucursal": st.column_config.SelectboxColumn("Sucursal", options=branches_for_editor, required=True),
+                    "ingrediente_id": st.column_config.SelectboxColumn("Ingrediente ID", options=ingredient_ids, required=True),
+                    "nombre": st.column_config.TextColumn("Ingrediente", help="Se refresca después de aplicar los cambios."),
+                    "cantidad_formatos": st.column_config.NumberColumn("Cantidad de formatos", min_value=0, step=1, format="%d"),
+                },
+            )
+            action_cols = st.columns([1.25, 1, 1])
+            with action_cols[0]:
+                if st.button("Aplicar cambios y recalcular", type="primary", use_container_width=True, key="apply_edited_order"):
+                    apply_active_order(edited_order[list(ORDER_COLUMNS)], "Edición manual")
+            with action_cols[1]:
+                st.download_button(
+                    "Descargar orden activa",
+                    csv_bytes(normalize_order_frame(st.session_state["active_order"])),
+                    "orden_compra_activa.csv",
+                    "text/csv",
+                    use_container_width=True,
+                    key="download_active_order",
+                )
+            with action_cols[2]:
+                if st.button("Restaurar original", use_container_width=True, key="reset_active_order"):
+                    reset_active_order(base_data.orden_compra)
 
     if purchase_result is None:
         st.error("No es posible revisar órdenes mientras existan errores bloqueantes.")
@@ -1264,6 +1722,221 @@ elif current_page == "Recomendado":
             )
 
 # -----------------------------------------------------------------------------
+# REDISTRIBUCIÓN INTERNA — optimización de red antes de comprar más.
+# -----------------------------------------------------------------------------
+elif current_page == "Redistribución":
+    st.markdown(f'<div id="{PAGE_ANCHORS["Redistribución"]}" style="scroll-margin-top:1rem;"></div>', unsafe_allow_html=True)
+    render_page_head(
+        "MUEVE ANTES DE COMPRAR",
+        "Lo que sobra en un barrio puede hacer falta en otro. Aprovecha excedentes seguros de la red antes de aumentar la compra al proveedor.",
+        "redistribution",
+        "Optimización entre sucursales",
+    )
+    if scroll_target == PAGE_ANCHORS["Redistribución"]:
+        emit_scroll_to(PAGE_ANCHORS["Redistribución"])
+        st.session_state["_pending_scroll_target"] = None
+
+    if purchase_result is None:
+        st.error("La redistribución se habilitará cuando los datos permitan ejecutar el análisis de compras.")
+    elif redistribution_result.transfers.empty:
+        st.success(
+            "Con la orden activa no hay excedentes de otras sucursales que permitan evitar formatos adicionales de compra. "
+            "El sistema volverá a evaluar esta oportunidad automáticamente si cargas o editas la orden."
+        )
+        with st.expander("Qué busca esta optimización"):
+            st.write(
+                "El motor compara el balance post-orden de cada ingrediente en todas las sucursales. "
+                "Si una queda corta y otra conserva un excedente seguro del mismo producto, intenta cubrir el déficit internamente "
+                "antes de recomendar formatos adicionales al proveedor."
+            )
+    else:
+        render_kpis([
+            ("Movimientos", str(redistribution_result.transfer_count), "Traslados sugeridos", True),
+            ("Formatos evitados", str(redistribution_result.formats_avoided), "Compra adicional potencial", True),
+            ("Productos", str(redistribution_result.product_count), "Con oportunidad de balance", False),
+            ("Beneficiadas", str(redistribution_result.benefited_branch_count), "Sucursales receptoras", False),
+            ("Donantes", str(redistribution_result.donor_branch_count), "Sucursales con excedente", False),
+        ])
+
+        st.caption(
+            "Nota operativa: antes de ejecutar un traslado deben validarse empaque, inocuidad, transporte y tiempos entre sucursales. "
+            "El cálculo nunca deja al origen por debajo de su consumo proyectado."
+        )
+
+        transfers = redistribution_result.transfers.copy()
+        receiver_summary = redistribution_result.receivers.copy()
+        ingredient_options = (
+            transfers[["ingrediente_id", "nombre"]]
+            .drop_duplicates()
+            .sort_values("nombre")
+        )
+        ingredient_lookup = dict(zip(ingredient_options["ingrediente_id"], ingredient_options["nombre"]))
+        destination_options = sorted(transfers["sucursal_destino"].dropna().unique().tolist())
+        origin_type_labels = {
+            "INVENTARIO_EXCEDENTE": "Inventario excedente",
+            "REASIGNAR_PEDIDO": "Reasignar pedido",
+            "REDONDEO_FORMATO": "Redondeo normal",
+        }
+
+        st.markdown(
+            '<div class="filter-box"><div class="filter-box-title">FILTRAR OPORTUNIDADES</div>'
+            '<div class="filter-box-note">Explora qué producto, destino y tipo de excedente generan la oportunidad de redistribución.</div></div>',
+            unsafe_allow_html=True,
+        )
+        rc1, rc2, rc3 = st.columns(3)
+        with rc1:
+            red_destination = st.selectbox(
+                "Sucursal destino",
+                ["Todas", *destination_options],
+                key="redistribution_destination",
+            )
+        with rc2:
+            red_ingredient = st.selectbox(
+                "Ingrediente",
+                ["Todos", *ingredient_options["ingrediente_id"].tolist()],
+                format_func=lambda value: value if value == "Todos" else ingredient_lookup.get(value, value),
+                key="redistribution_ingredient",
+            )
+        with rc3:
+            source_types = transfers["tipo_origen"].dropna().unique().tolist()
+            red_source = st.selectbox(
+                "Origen del excedente",
+                ["Todos", *source_types],
+                format_func=lambda value: value if value == "Todos" else origin_type_labels.get(value, value),
+                key="redistribution_source_type",
+            )
+
+        filtered_transfers = transfers.copy()
+        if red_destination != "Todas":
+            filtered_transfers = filtered_transfers.loc[filtered_transfers["sucursal_destino"].eq(red_destination)]
+        if red_ingredient != "Todos":
+            filtered_transfers = filtered_transfers.loc[filtered_transfers["ingrediente_id"].eq(red_ingredient)]
+        if red_source != "Todos":
+            filtered_transfers = filtered_transfers.loc[filtered_transfers["tipo_origen"].eq(red_source)]
+
+        if filtered_transfers.empty:
+            st.info("No hay movimientos para la combinación de filtros seleccionada.")
+        else:
+            filtered_keys = filtered_transfers[["ingrediente_id", "sucursal_destino"]].drop_duplicates()
+            filtered_receivers = receiver_summary.merge(
+                filtered_keys,
+                on=["ingrediente_id", "sucursal_destino"],
+                how="inner",
+            )
+
+            if not filtered_receivers.empty:
+                chart = filtered_receivers.copy()
+                chart["Caso"] = chart["sucursal_destino"] + " · " + chart["nombre"]
+                chart_long = chart.melt(
+                    id_vars="Caso",
+                    value_vars=["formatos_adicionales_antes", "formatos_adicionales_despues"],
+                    var_name="Momento",
+                    value_name="Formatos",
+                )
+                chart_long["Momento"] = chart_long["Momento"].map({
+                    "formatos_adicionales_antes": "Antes de redistribuir",
+                    "formatos_adicionales_despues": "Después de redistribuir",
+                })
+                red_fig = px.bar(
+                    chart_long,
+                    x="Formatos",
+                    y="Caso",
+                    color="Momento",
+                    orientation="h",
+                    barmode="group",
+                    text_auto=".0f",
+                    color_discrete_map={
+                        "Antes de redistribuir": "#AAA39B",
+                        "Después de redistribuir": "#E2372E",
+                    },
+                )
+                red_fig.update_layout(
+                    title="Formatos adicionales antes vs. después del balance interno",
+                    height=max(330, 115 * len(chart)),
+                    xaxis_title="Formatos adicionales al proveedor",
+                    yaxis_title="",
+                    legend_title="",
+                    margin={"l":20, "r":25, "t":60, "b":35},
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(255,255,255,.9)",
+                )
+                red_fig.update_xaxes(gridcolor="rgba(23,23,23,.08)", dtick=1)
+                st.plotly_chart(red_fig, use_container_width=True)
+
+            st.subheader("Plan sugerido de movimientos")
+            transfer_display = filtered_transfers.copy()
+            transfer_display["Origen del excedente"] = transfer_display["tipo_origen"].map(origin_type_labels)
+            transfer_display = transfer_display.rename(columns={
+                "sucursal_origen": "Desde",
+                "sucursal_destino": "Hacia",
+                "nombre": "Ingrediente",
+                "cantidad_transferir": "Transferir",
+                "unidad_base": "Unidad",
+                "viabilidad": "Viabilidad",
+                "equivalente_formatos": "Equiv. formatos",
+                "formatos_evitados_incrementales": "Formatos evitados",
+                "accion_recomendada": "Acción",
+            })
+            st.dataframe(
+                transfer_display[[
+                    "Desde", "Hacia", "Ingrediente", "Transferir", "Unidad",
+                    "Origen del excedente", "Viabilidad", "Equiv. formatos",
+                    "Formatos evitados", "Acción",
+                ]],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Transferir": st.column_config.NumberColumn(format="%.2f"),
+                    "Equiv. formatos": st.column_config.NumberColumn(format="%.2f"),
+                    "Formatos evitados": st.column_config.NumberColumn(format="%.0f"),
+                },
+            )
+
+            st.subheader("Impacto por sucursal receptora")
+            if not filtered_receivers.empty:
+                receiver_display = filtered_receivers.rename(columns={
+                    "sucursal_destino": "Sucursal",
+                    "nombre": "Ingrediente",
+                    "deficit_post_orden": "Déficit después de la orden",
+                    "cantidad_redistribuida": "Redistribuido",
+                    "deficit_restante": "Déficit restante",
+                    "formatos_adicionales_antes": "Formatos antes",
+                    "formatos_adicionales_despues": "Formatos después",
+                    "formatos_evitados": "Formatos evitados",
+                    "porcentaje_deficit_cubierto": "% déficit cubierto",
+                })
+                st.dataframe(
+                    receiver_display[[
+                        "Sucursal", "Ingrediente", "Déficit después de la orden", "Redistribuido",
+                        "Déficit restante", "Formatos antes", "Formatos después",
+                        "Formatos evitados", "% déficit cubierto",
+                    ]],
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+            st.download_button(
+                "Descargar plan de redistribución",
+                csv_bytes(filtered_transfers),
+                "barrio_plan_redistribucion.csv",
+                "text/csv",
+                use_container_width=True,
+            )
+
+        with st.expander("Cómo funciona · y por qué no convierte el redondeo en sobrepedido"):
+            st.markdown(
+                """
+                **1.** Calcula el balance de cada sucursal después de su orden: `inventario + pedido − pronóstico`.  
+                **2.** Una sucursal solo puede donar la parte positiva de ese balance; nunca se le quita producto necesario para cubrir su propio consumo proyectado.  
+                **3.** Busca otra sucursal con déficit del **mismo ingrediente**.  
+                **4.** Prioriza inventario disponible y reasignaciones claras de pedido. También puede consolidar pequeños sobrantes producidos por el redondeo normal de formatos.  
+                **5.** Solo muestra una oportunidad si el balance interno logra evitar al menos **un formato adicional de compra**.
+
+                Un sobrante menor a un formato completo sigue siendo redondeo normal, tal como establece el reto; aquí simplemente se evalúa si varios sobrantes seguros de la red pueden aprovecharse antes de comprar más.
+                """
+            )
+
+# -----------------------------------------------------------------------------
 # PRONÓSTICO — se conserva el diseño aprobado; filtros propios de la vista.
 # -----------------------------------------------------------------------------
 elif current_page == "Pronóstico":
@@ -1287,12 +1960,21 @@ elif current_page == "Pronóstico":
             display = projections.rename(columns={
                 "sucursal":"Sucursal","nombre":"Ingrediente","proveedor":"Proveedor","unidad_base":"Unidad",
                 "semanas_disponibles":"Semanas","consumo_minimo":"Mínimo","consumo_maximo":"Máximo",
-                "consumo_promedio":"Promedio","consumo_proyectado":"Pronóstico","historico_completo":"Completo",
+                "consumo_promedio":"Promedio","consumo_proyectado":"Pronóstico",
+                "consumo_proyectado_base":"Base simple","ajuste_vs_promedio":"Ajuste",
+                "metodo_proyeccion":"Método","outliers_detectados":"Atípicos",
+                "confianza_proyeccion":"Confianza","historico_completo":"Completo",
             })
             st.dataframe(
-                display[["Sucursal","Ingrediente","Proveedor","Unidad","Semanas","Mínimo","Máximo","Promedio","Pronóstico","Completo"]],
+                display[["Sucursal","Ingrediente","Proveedor","Unidad","Semanas","Promedio","Base simple","Pronóstico","Ajuste","Método","Atípicos","Confianza"]],
                 use_container_width=True,
                 hide_index=True,
+                column_config={
+                    "Promedio": st.column_config.NumberColumn(format="%.2f"),
+                    "Base simple": st.column_config.NumberColumn(format="%.2f"),
+                    "Pronóstico": st.column_config.NumberColumn(format="%.2f"),
+                    "Ajuste": st.column_config.NumberColumn(format="%+.2f"),
+                },
             )
             c1, c2 = st.columns(2)
             branches = sorted(projections["sucursal"].dropna().unique())
@@ -1356,14 +2038,220 @@ elif current_page == "Pronóstico":
                         <div class="highlight-title">{html.escape(labels[ingredient])}</div>
                         <div class="highlight-text">Consumo proyectado para <strong>{html.escape(branch)}</strong> en la próxima semana.</div>
                         <div class="highlight-list">
-                            <div><strong>Promedio:</strong> {selected['consumo_promedio']:.2f} {selected['unidad_base']}</div>
+                            <div><strong>Método:</strong> {html.escape(str(selected['metodo_proyeccion']))}</div>
+                            <div><strong>Confianza:</strong> {html.escape(str(selected['confianza_proyeccion']))}</div>
+                            <div><strong>Promedio simple:</strong> {selected['consumo_proyectado_base']:.2f} {selected['unidad_base']}</div>
+                            <div><strong>Ajuste inteligente:</strong> {selected['ajuste_vs_promedio']:+.2f} {selected['unidad_base']}</div>
+                            <div><strong>Semanas atípicas detectadas:</strong> {int(selected['outliers_detectados'])}</div>
                             <div><strong>Rango histórico:</strong> {selected['consumo_minimo']:.2f} – {selected['consumo_maximo']:.2f} {selected['unidad_base']}</div>
-                            <div><strong>Semanas disponibles:</strong> {int(selected['semanas_disponibles'])}</div>
                         </div>
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
+
+# -----------------------------------------------------------------------------
+# ANOMALÍAS ENTRE SUCURSALES
+# -----------------------------------------------------------------------------
+elif current_page == "Anomalías":
+    st.markdown(f'<div id="{PAGE_ANCHORS["Anomalías"]}" style="scroll-margin-top:1rem;"></div>', unsafe_allow_html=True)
+    render_page_head(
+        "LO RARO TAMBIÉN CUENTA",
+        "Compara la cobertura que dejaría cada pedido con las demás sucursales que manejan el mismo ingrediente y detecta comportamientos que merecen una segunda revisión.",
+        "anomalies",
+        "Comparación entre sucursales",
+    )
+    if scroll_target == PAGE_ANCHORS["Anomalías"]:
+        emit_scroll_to(PAGE_ANCHORS["Anomalías"])
+        st.session_state["_pending_scroll_target"] = None
+
+    st.markdown(
+        """
+        <div class="filter-box">
+            <div class="filter-box-title">¿QUÉ ESTAMOS COMPARANDO?</div>
+            <div class="filter-box-note">La cobertura post-compra estima cuántas semanas de consumo quedarían cubiertas después de sumar inventario actual + pedido. Cada sucursal se compara contra la mediana de las otras sucursales para el mismo ingrediente.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    anomalies = anomaly_result.anomalies.copy()
+    if anomalies.empty:
+        st.success("No se detectaron pedidos con una cobertura claramente atípica frente a las demás sucursales.")
+        st.caption("Esto puede ocurrir, por ejemplo, después de cargar una orden corregida desde la sección Órdenes.")
+    else:
+        render_kpis([
+            ("Anomalías", str(anomaly_result.anomaly_count), "Casos para revisar", anomaly_result.anomaly_count > 0),
+            ("Cobertura alta", str(anomaly_result.high_count), "Posible sobrestock", anomaly_result.high_count > 0),
+            ("Cobertura baja", str(anomaly_result.low_count), "Posible quiebre", anomaly_result.low_count > 0),
+            ("Ingredientes", str(anomalies["ingrediente_id"].nunique()), "Con comportamiento atípico", False),
+        ])
+
+        branch_options = sorted(anomalies["sucursal"].dropna().unique().tolist())
+        ingredient_options = (
+            anomalies[["ingrediente_id", "nombre"]]
+            .drop_duplicates()
+            .sort_values("nombre")
+        )
+        ingredient_lookup = dict(zip(ingredient_options["ingrediente_id"], ingredient_options["nombre"]))
+
+        filter_cols = st.columns(3)
+        with filter_cols[0]:
+            anomaly_branch = st.selectbox(
+                "Sucursal",
+                ["Todas las sucursales", *branch_options],
+                key="anomaly_branch",
+            )
+        with filter_cols[1]:
+            anomaly_type = st.selectbox(
+                "Tipo",
+                ["Todos", "COBERTURA_ALTA", "COBERTURA_BAJA"],
+                format_func=lambda value: {
+                    "Todos": "Todos",
+                    "COBERTURA_ALTA": "Cobertura alta",
+                    "COBERTURA_BAJA": "Cobertura baja",
+                }.get(value, value),
+                key="anomaly_type",
+            )
+        with filter_cols[2]:
+            anomaly_ingredient = st.selectbox(
+                "Ingrediente",
+                ["Todos los ingredientes", *ingredient_options["ingrediente_id"].tolist()],
+                format_func=lambda value: value if value == "Todos los ingredientes" else ingredient_lookup.get(value, value),
+                key="anomaly_ingredient",
+            )
+
+        filtered_anomalies = anomalies.copy()
+        if anomaly_branch != "Todas las sucursales":
+            filtered_anomalies = filtered_anomalies.loc[filtered_anomalies["sucursal"].eq(anomaly_branch)]
+        if anomaly_type != "Todos":
+            filtered_anomalies = filtered_anomalies.loc[filtered_anomalies["tipo_anomalia"].eq(anomaly_type)]
+        if anomaly_ingredient != "Todos los ingredientes":
+            filtered_anomalies = filtered_anomalies.loc[filtered_anomalies["ingrediente_id"].eq(anomaly_ingredient)]
+
+        if filtered_anomalies.empty:
+            st.info("No hay anomalías para la combinación de filtros seleccionada.")
+        else:
+            chart_frame = filtered_anomalies[[
+                "sucursal", "nombre", "cobertura_post_compra", "cobertura_mediana_pares"
+            ]].copy()
+            chart_frame["Caso"] = chart_frame["sucursal"] + " · " + chart_frame["nombre"]
+            chart_long = chart_frame.melt(
+                id_vars="Caso",
+                value_vars=["cobertura_post_compra", "cobertura_mediana_pares"],
+                var_name="serie",
+                value_name="semanas",
+            )
+            chart_long["serie"] = chart_long["serie"].map({
+                "cobertura_post_compra": "Sucursal",
+                "cobertura_mediana_pares": "Mediana de las demás",
+            })
+            anomaly_fig = px.bar(
+                chart_long,
+                x="semanas",
+                y="Caso",
+                color="serie",
+                orientation="h",
+                barmode="group",
+                text_auto=".2f",
+                color_discrete_map={"Sucursal": "#E2372E", "Mediana de las demás": "#AAA39B"},
+            )
+            anomaly_fig.update_layout(
+                title="Cobertura post-compra vs referencia de otras sucursales",
+                height=max(360, 105 * len(filtered_anomalies)),
+                xaxis_title="Semanas de cobertura",
+                yaxis_title="",
+                legend_title="",
+                margin={"l":20,"r":25,"t":60,"b":40},
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(255,255,255,.9)",
+                bargap=.25,
+            )
+            anomaly_fig.update_xaxes(gridcolor="rgba(23,23,23,.08)")
+            st.plotly_chart(anomaly_fig, use_container_width=True)
+
+            st.subheader("Casos detectados")
+            anomaly_display = filtered_anomalies.copy()
+            anomaly_display["Tipo"] = anomaly_display["tipo_anomalia"].map({
+                "COBERTURA_ALTA": "Cobertura alta",
+                "COBERTURA_BAJA": "Cobertura baja",
+            })
+            anomaly_display = anomaly_display.rename(columns={
+                "severidad_anomalia": "Severidad",
+                "sucursal": "Sucursal",
+                "nombre": "Ingrediente",
+                "cobertura_post_compra": "Cobertura sucursal",
+                "cobertura_mediana_pares": "Mediana otras",
+                "factor_vs_pares": "Factor",
+                "estado_orden": "Estado de orden",
+                "accion_recomendada": "Acción",
+            })
+            st.dataframe(
+                anomaly_display[[
+                    "Severidad", "Tipo", "Sucursal", "Ingrediente",
+                    "Cobertura sucursal", "Mediana otras", "Factor",
+                    "Estado de orden", "Acción",
+                ]],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Cobertura sucursal": st.column_config.NumberColumn(format="%.2f semanas"),
+                    "Mediana otras": st.column_config.NumberColumn(format="%.2f semanas"),
+                    "Factor": st.column_config.NumberColumn(format="%.2fx"),
+                    "Acción": st.column_config.TextColumn(width="large"),
+                },
+            )
+
+            st.subheader("Detalle comparativo")
+            detail_indices = filtered_anomalies.index.tolist()
+            selected_anomaly_index = st.selectbox(
+                "Anomalía",
+                detail_indices,
+                format_func=lambda i: (
+                    f"{filtered_anomalies.loc[i, 'sucursal']} · "
+                    f"{filtered_anomalies.loc[i, 'nombre']} · "
+                    f"{'Cobertura alta' if filtered_anomalies.loc[i, 'tipo_anomalia'] == 'COBERTURA_ALTA' else 'Cobertura baja'}"
+                ),
+                key="selected_cross_branch_anomaly",
+            )
+            selected_anomaly = filtered_anomalies.loc[selected_anomaly_index]
+            render_kpis([
+                ("Sucursal", f"{selected_anomaly['cobertura_post_compra']:.2f}", "Semanas de cobertura", True),
+                ("Otras", f"{selected_anomaly['cobertura_mediana_pares']:.2f}", "Mediana de sucursales", False),
+                ("Factor", f"{selected_anomaly['factor_vs_pares']:.2f}x", "Respecto a las demás", True),
+                ("Pedido", str(int(selected_anomaly['formatos_solicitados'])), "Formatos solicitados", False),
+            ])
+            if selected_anomaly["tipo_anomalia"] == "COBERTURA_ALTA":
+                st.warning(selected_anomaly["mensaje_anomalia"])
+            else:
+                st.error(selected_anomaly["mensaje_anomalia"])
+
+            order_href = build_query_href(
+                "Órdenes",
+                branch=str(selected_anomaly["sucursal"]),
+                line=int(selected_anomaly["analysis_index"]),
+                scroll_target="orders-end",
+            )
+            st.markdown(
+                f"""
+                <a href="{order_href}" target="_self"
+                   style="color:#E2372E;font-weight:800;text-decoration:none;font-size:1rem;border-bottom:2px solid #E2372E;padding-bottom:2px;">
+                    Revisar esta línea en Órdenes →
+                </a>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with st.expander("Cómo se detecta una anomalía"):
+            st.markdown(
+                """
+                **1. Cobertura post-compra** = `(inventario actual + pedido) / consumo proyectado`.  
+                **2. Referencia** = mediana de las otras sucursales para el mismo ingrediente.  
+                **3. Señal** = se marca únicamente cuando la diferencia es suficientemente grande tanto en proporción como en semanas de cobertura.
+
+                Esto evita comparar directamente cajas o sacos y permite detectar situaciones como una sucursal que quedaría con cuatro semanas de albahaca mientras las demás rondan una semana.
+                """
+            )
 
 # -----------------------------------------------------------------------------
 # DATOS
