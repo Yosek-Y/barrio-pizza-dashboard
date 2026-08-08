@@ -904,7 +904,7 @@ def render_pizzia_assistant(
             "¿Qué debería revisar primero?",
             "¿Qué sucursal tiene más alertas?",
             "¿Qué anomalías detectaste?",
-            "¿Qué puedo redistribuir antes de comprar?",
+            "¿Qué sucursal tiene mayor riesgo de quedarse sin producto esta semana?",
         ]
         suggestion_cols = st.columns(2)
         pending_question: str | None = None
