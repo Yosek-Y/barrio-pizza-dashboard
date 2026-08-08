@@ -32,7 +32,7 @@ ASSET_SLOTS = {
     "overview": ASSETS_DIR / "panel_general.png",
     "alerts": ASSETS_DIR / "revision_ordenes.png",
     "corrected": ASSETS_DIR / "pedido_recomendado.png",
-    "redistribution": ASSETS_DIR / "pedido_recomendado.png",
+    "redistribution": ASSETS_DIR / "Redistribucion_barrio.png",
     "forecast": ASSETS_DIR / "pronostico.png",
     "anomalies": ASSETS_DIR / "Anomalias_barrio.jpg",
     "pizzia_icon": ASSETS_DIR / "pizzia_icon.png",
