@@ -19,7 +19,6 @@ from src.data_chat import DEFAULT_MODEL, answer_locally, ask_gemini, build_chat_
 from src.data_loader import DATASET_FILES, load_data_bundle
 from src.forecasting import build_smart_forecast, get_history_with_projection
 from src.purchase_analysis import analyze_orders
-from src.redistribution import optimize_redistribution
 from src.order_workspace import ORDER_COLUMNS, editor_frame, missing_order_columns, normalize_order_frame, with_order
 from src.validations import validate_data
 
@@ -32,19 +31,17 @@ ASSET_SLOTS = {
     "overview": ASSETS_DIR / "panel_general.png",
     "alerts": ASSETS_DIR / "revision_ordenes.png",
     "corrected": ASSETS_DIR / "pedido_recomendado.png",
-    "redistribution": ASSETS_DIR / "pedido_recomendado.png",
     "forecast": ASSETS_DIR / "pronostico.png",
     "anomalies": ASSETS_DIR / "Anomalias_barrio.jpg",
     "pizzia_icon": ASSETS_DIR / "pizzia_icon.png",
     "quality": ASSETS_DIR / "calidad_datos.png",
 }
 
-PAGE_OPTIONS = ["Resumen", "Órdenes", "Recomendado", "Redistribución", "Pronóstico", "Anomalías", "Datos"]
+PAGE_OPTIONS = ["Resumen", "Órdenes", "Recomendado", "Pronóstico", "Anomalías", "Datos"]
 PAGE_SHORT = {
     "Resumen": "RES",
     "Órdenes": "ORD",
     "Recomendado": "REC",
-    "Redistribución": "MOV",
     "Pronóstico": "PRO",
     "Anomalías": "ANO",
     "Datos": "DAT",
@@ -53,7 +50,6 @@ PAGE_SLUG = {
     "Resumen": "resumen",
     "Órdenes": "ordenes",
     "Recomendado": "recomendado",
-    "Redistribución": "redistribucion",
     "Pronóstico": "pronostico",
     "Anomalías": "anomalias",
     "Datos": "datos",
@@ -816,7 +812,6 @@ def render_pizzia_assistant(
     forecast_frame: pd.DataFrame,
     anomalies: pd.DataFrame,
     supplier_summary: pd.DataFrame,
-    redistribution: pd.DataFrame,
 ) -> None:
     """Renderiza PizzIA como asistente lateral persistente en cualquier sección."""
     if "pizzia_open" not in st.session_state:
@@ -829,7 +824,6 @@ def render_pizzia_assistant(
         anomalies,
         supplier_summary,
         active_order_source=str(st.session_state.get("active_order_source", "Orden activa")),
-        redistribution=redistribution,
     )
 
     current_fingerprint = order_fingerprint(st.session_state.get("active_order", pd.DataFrame()))
@@ -840,7 +834,7 @@ def render_pizzia_assistant(
                 "role": "assistant",
                 "content": (
                     "¡Ey! Soy PizzIA 🍕. Estoy conectado a la orden activa. "
-                    "Pregúntame por alertas, ingredientes, sucursales, pronósticos, anomalías o redistribución interna."
+                    "Pregúntame por alertas, ingredientes, sucursales, proveedores, pronósticos o anomalías."
                 ),
                 "mode": "system",
             }
@@ -904,7 +898,7 @@ def render_pizzia_assistant(
             "¿Qué debería revisar primero?",
             "¿Qué sucursal tiene más alertas?",
             "¿Qué anomalías detectaste?",
-            "¿Qué sucursal tiene mayor riesgo de quedarse sin producto esta semana?",
+            "¿Qué proveedor concentra más ajustes?",
         ]
         suggestion_cols = st.columns(2)
         pending_question: str | None = None
@@ -945,9 +939,9 @@ def render_pizzia_assistant(
                         model=pizzia_model,
                     )
                 else:
-                    answer = answer_locally(question, analysis, anomalies, supplier_summary, redistribution)
+                    answer = answer_locally(question, analysis, anomalies, supplier_summary)
             except Exception as exc:
-                answer = answer_locally(question, analysis, anomalies, supplier_summary, redistribution)
+                answer = answer_locally(question, analysis, anomalies, supplier_summary)
                 st.session_state["pizzia_last_error"] = str(exc)
 
             st.session_state["pizzia_messages"].append(
@@ -1168,7 +1162,6 @@ analysis = purchase_result.analysis.copy() if purchase_result is not None else p
 corrected_order = purchase_result.corrected_order() if purchase_result is not None else pd.DataFrame()
 supplier_summary = purchase_result.supplier_summary() if purchase_result is not None else pd.DataFrame()
 anomaly_result = detect_cross_branch_anomalies(analysis)
-redistribution_result = optimize_redistribution(analysis)
 
 requested_page = PAGE_FROM_SLUG.get(str(st.query_params.get("page", "")).strip().lower())
 if requested_page:
@@ -1268,7 +1261,6 @@ render_pizzia_assistant(
     forecast_context,
     anomaly_result.anomalies,
     supplier_summary,
-    redistribution_result.transfers,
 )
 
 # -----------------------------------------------------------------------------
@@ -1719,221 +1711,6 @@ elif current_page == "Recomendado":
                 "barrio_resumen_proveedores.csv",
                 "text/csv",
                 use_container_width=True,
-            )
-
-# -----------------------------------------------------------------------------
-# REDISTRIBUCIÓN INTERNA — optimización de red antes de comprar más.
-# -----------------------------------------------------------------------------
-elif current_page == "Redistribución":
-    st.markdown(f'<div id="{PAGE_ANCHORS["Redistribución"]}" style="scroll-margin-top:1rem;"></div>', unsafe_allow_html=True)
-    render_page_head(
-        "MUEVE ANTES DE COMPRAR",
-        "Lo que sobra en un barrio puede hacer falta en otro. Aprovecha excedentes seguros de la red antes de aumentar la compra al proveedor.",
-        "redistribution",
-        "Optimización entre sucursales",
-    )
-    if scroll_target == PAGE_ANCHORS["Redistribución"]:
-        emit_scroll_to(PAGE_ANCHORS["Redistribución"])
-        st.session_state["_pending_scroll_target"] = None
-
-    if purchase_result is None:
-        st.error("La redistribución se habilitará cuando los datos permitan ejecutar el análisis de compras.")
-    elif redistribution_result.transfers.empty:
-        st.success(
-            "Con la orden activa no hay excedentes de otras sucursales que permitan evitar formatos adicionales de compra. "
-            "El sistema volverá a evaluar esta oportunidad automáticamente si cargas o editas la orden."
-        )
-        with st.expander("Qué busca esta optimización"):
-            st.write(
-                "El motor compara el balance post-orden de cada ingrediente en todas las sucursales. "
-                "Si una queda corta y otra conserva un excedente seguro del mismo producto, intenta cubrir el déficit internamente "
-                "antes de recomendar formatos adicionales al proveedor."
-            )
-    else:
-        render_kpis([
-            ("Movimientos", str(redistribution_result.transfer_count), "Traslados sugeridos", True),
-            ("Formatos evitados", str(redistribution_result.formats_avoided), "Compra adicional potencial", True),
-            ("Productos", str(redistribution_result.product_count), "Con oportunidad de balance", False),
-            ("Beneficiadas", str(redistribution_result.benefited_branch_count), "Sucursales receptoras", False),
-            ("Donantes", str(redistribution_result.donor_branch_count), "Sucursales con excedente", False),
-        ])
-
-        st.caption(
-            "Nota operativa: antes de ejecutar un traslado deben validarse empaque, inocuidad, transporte y tiempos entre sucursales. "
-            "El cálculo nunca deja al origen por debajo de su consumo proyectado."
-        )
-
-        transfers = redistribution_result.transfers.copy()
-        receiver_summary = redistribution_result.receivers.copy()
-        ingredient_options = (
-            transfers[["ingrediente_id", "nombre"]]
-            .drop_duplicates()
-            .sort_values("nombre")
-        )
-        ingredient_lookup = dict(zip(ingredient_options["ingrediente_id"], ingredient_options["nombre"]))
-        destination_options = sorted(transfers["sucursal_destino"].dropna().unique().tolist())
-        origin_type_labels = {
-            "INVENTARIO_EXCEDENTE": "Inventario excedente",
-            "REASIGNAR_PEDIDO": "Reasignar pedido",
-            "REDONDEO_FORMATO": "Redondeo normal",
-        }
-
-        st.markdown(
-            '<div class="filter-box"><div class="filter-box-title">FILTRAR OPORTUNIDADES</div>'
-            '<div class="filter-box-note">Explora qué producto, destino y tipo de excedente generan la oportunidad de redistribución.</div></div>',
-            unsafe_allow_html=True,
-        )
-        rc1, rc2, rc3 = st.columns(3)
-        with rc1:
-            red_destination = st.selectbox(
-                "Sucursal destino",
-                ["Todas", *destination_options],
-                key="redistribution_destination",
-            )
-        with rc2:
-            red_ingredient = st.selectbox(
-                "Ingrediente",
-                ["Todos", *ingredient_options["ingrediente_id"].tolist()],
-                format_func=lambda value: value if value == "Todos" else ingredient_lookup.get(value, value),
-                key="redistribution_ingredient",
-            )
-        with rc3:
-            source_types = transfers["tipo_origen"].dropna().unique().tolist()
-            red_source = st.selectbox(
-                "Origen del excedente",
-                ["Todos", *source_types],
-                format_func=lambda value: value if value == "Todos" else origin_type_labels.get(value, value),
-                key="redistribution_source_type",
-            )
-
-        filtered_transfers = transfers.copy()
-        if red_destination != "Todas":
-            filtered_transfers = filtered_transfers.loc[filtered_transfers["sucursal_destino"].eq(red_destination)]
-        if red_ingredient != "Todos":
-            filtered_transfers = filtered_transfers.loc[filtered_transfers["ingrediente_id"].eq(red_ingredient)]
-        if red_source != "Todos":
-            filtered_transfers = filtered_transfers.loc[filtered_transfers["tipo_origen"].eq(red_source)]
-
-        if filtered_transfers.empty:
-            st.info("No hay movimientos para la combinación de filtros seleccionada.")
-        else:
-            filtered_keys = filtered_transfers[["ingrediente_id", "sucursal_destino"]].drop_duplicates()
-            filtered_receivers = receiver_summary.merge(
-                filtered_keys,
-                on=["ingrediente_id", "sucursal_destino"],
-                how="inner",
-            )
-
-            if not filtered_receivers.empty:
-                chart = filtered_receivers.copy()
-                chart["Caso"] = chart["sucursal_destino"] + " · " + chart["nombre"]
-                chart_long = chart.melt(
-                    id_vars="Caso",
-                    value_vars=["formatos_adicionales_antes", "formatos_adicionales_despues"],
-                    var_name="Momento",
-                    value_name="Formatos",
-                )
-                chart_long["Momento"] = chart_long["Momento"].map({
-                    "formatos_adicionales_antes": "Antes de redistribuir",
-                    "formatos_adicionales_despues": "Después de redistribuir",
-                })
-                red_fig = px.bar(
-                    chart_long,
-                    x="Formatos",
-                    y="Caso",
-                    color="Momento",
-                    orientation="h",
-                    barmode="group",
-                    text_auto=".0f",
-                    color_discrete_map={
-                        "Antes de redistribuir": "#AAA39B",
-                        "Después de redistribuir": "#E2372E",
-                    },
-                )
-                red_fig.update_layout(
-                    title="Formatos adicionales antes vs. después del balance interno",
-                    height=max(330, 115 * len(chart)),
-                    xaxis_title="Formatos adicionales al proveedor",
-                    yaxis_title="",
-                    legend_title="",
-                    margin={"l":20, "r":25, "t":60, "b":35},
-                    paper_bgcolor="rgba(0,0,0,0)",
-                    plot_bgcolor="rgba(255,255,255,.9)",
-                )
-                red_fig.update_xaxes(gridcolor="rgba(23,23,23,.08)", dtick=1)
-                st.plotly_chart(red_fig, use_container_width=True)
-
-            st.subheader("Plan sugerido de movimientos")
-            transfer_display = filtered_transfers.copy()
-            transfer_display["Origen del excedente"] = transfer_display["tipo_origen"].map(origin_type_labels)
-            transfer_display = transfer_display.rename(columns={
-                "sucursal_origen": "Desde",
-                "sucursal_destino": "Hacia",
-                "nombre": "Ingrediente",
-                "cantidad_transferir": "Transferir",
-                "unidad_base": "Unidad",
-                "viabilidad": "Viabilidad",
-                "equivalente_formatos": "Equiv. formatos",
-                "formatos_evitados_incrementales": "Formatos evitados",
-                "accion_recomendada": "Acción",
-            })
-            st.dataframe(
-                transfer_display[[
-                    "Desde", "Hacia", "Ingrediente", "Transferir", "Unidad",
-                    "Origen del excedente", "Viabilidad", "Equiv. formatos",
-                    "Formatos evitados", "Acción",
-                ]],
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Transferir": st.column_config.NumberColumn(format="%.2f"),
-                    "Equiv. formatos": st.column_config.NumberColumn(format="%.2f"),
-                    "Formatos evitados": st.column_config.NumberColumn(format="%.0f"),
-                },
-            )
-
-            st.subheader("Impacto por sucursal receptora")
-            if not filtered_receivers.empty:
-                receiver_display = filtered_receivers.rename(columns={
-                    "sucursal_destino": "Sucursal",
-                    "nombre": "Ingrediente",
-                    "deficit_post_orden": "Déficit después de la orden",
-                    "cantidad_redistribuida": "Redistribuido",
-                    "deficit_restante": "Déficit restante",
-                    "formatos_adicionales_antes": "Formatos antes",
-                    "formatos_adicionales_despues": "Formatos después",
-                    "formatos_evitados": "Formatos evitados",
-                    "porcentaje_deficit_cubierto": "% déficit cubierto",
-                })
-                st.dataframe(
-                    receiver_display[[
-                        "Sucursal", "Ingrediente", "Déficit después de la orden", "Redistribuido",
-                        "Déficit restante", "Formatos antes", "Formatos después",
-                        "Formatos evitados", "% déficit cubierto",
-                    ]],
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
-            st.download_button(
-                "Descargar plan de redistribución",
-                csv_bytes(filtered_transfers),
-                "barrio_plan_redistribucion.csv",
-                "text/csv",
-                use_container_width=True,
-            )
-
-        with st.expander("Cómo funciona · y por qué no convierte el redondeo en sobrepedido"):
-            st.markdown(
-                """
-                **1.** Calcula el balance de cada sucursal después de su orden: `inventario + pedido − pronóstico`.  
-                **2.** Una sucursal solo puede donar la parte positiva de ese balance; nunca se le quita producto necesario para cubrir su propio consumo proyectado.  
-                **3.** Busca otra sucursal con déficit del **mismo ingrediente**.  
-                **4.** Prioriza inventario disponible y reasignaciones claras de pedido. También puede consolidar pequeños sobrantes producidos por el redondeo normal de formatos.  
-                **5.** Solo muestra una oportunidad si el balance interno logra evitar al menos **un formato adicional de compra**.
-
-                Un sobrante menor a un formato completo sigue siendo redondeo normal, tal como establece el reto; aquí simplemente se evalúa si varios sobrantes seguros de la red pueden aprovecharse antes de comprar más.
-                """
             )
 
 # -----------------------------------------------------------------------------
